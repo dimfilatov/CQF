@@ -4,7 +4,24 @@
 
 This module contains the first assignment for the Certificate in Quantitative Finance (CQF) program, focusing on the **Binomial Option Pricing Model** - a foundational method for valuing derivatives.
 
-## Assignment 1: Binomial Option Pricing Model
+### Assignment 1: Market Analytics
+
+This addition contains tools for loading, processing, and analyzing financial time series in `market_analytics.py`.
+
+- **What it does**: Loads market data (via `quantmod.markets.getData`), creates lagged features, computes simple and log returns, calculates adjusted volatility statistics, compares even/odd day return behavior, and produces Q-Q and distribution plots for visual analysis.
+- **Main entry point**: the `MarketAnalytics` class. Example usage:
+
+	- Command line: `python market_analytics.py` (runs the example at the bottom of the script)
+	- As a module:
+
+		from market_analytics import MarketAnalytics
+		analytics = MarketAnalytics(ticker='^GSPC', period='max')
+		analytics.main()
+
+- **Dependencies**: `pandas`, `numpy`, `matplotlib`, `scipy`, and the `quantmod` package or local `quantmod.markets` module used for data retrieval.
+- **Notes**: Ensure required packages are installed and that the environment has network access for fetching data from Yahoo Finance or the configured data source.
+
+## Assignment 2: Binomial Option Pricing Model
 
 ### Introduction
 
@@ -77,6 +94,7 @@ The assignment includes a Python implementation with a `binomial_tree` class tha
 
 - `binomial_option_tree.ipynb`: Jupyter notebook with detailed explanations, formulas, and implementation
 - `binomial_option_tree.py`: Python script containing the core binomial tree implementation
+- `market_analytics.py`: Python module providing market data loading, returns/volatility analysis, and plotting utilities
 - `README.md`: This documentation file
 
 ### Key Takeaways
@@ -93,3 +111,5 @@ The binomial model provides:
 **Module**: CQF Module 1  
 **Topic**: Derivative Pricing Fundamentals  
 **Method**: Binomial Option Pricing Model
+
+---
