@@ -1,53 +1,162 @@
-# Portfolio Optimization using CVXPY
+# Portfolio Optimization and Risk Analytics
 
-A comprehensive Google Colab-compatible Python script for optimizing investment portfolios using Modern Portfolio Theory and convex optimization techniques.
+A comprehensive Python framework for portfolio optimization using Modern Portfolio Theory and advanced risk analytics, including Value at Risk (VaR) calculations and backtesting.
 
 ## 📋 Overview
 
-This project demonstrates portfolio optimization using CVXPY, a Python library for convex optimization. The script calculates optimal portfolio weights for three different investment objectives:
+This project provides a complete solution for investment portfolio management, combining:
 
-1. **Maximum Sharpe Ratio Portfolio** - Maximizes risk-adjusted returns
-2. **Minimum Variance Portfolio** - Minimizes overall portfolio risk
-3. **Maximum Return Portfolio** - Maximizes expected returns
+1. **Portfolio Optimization** using CVXPY convex optimization:
+   - Maximum Sharpe Ratio Portfolio
+   - Minimum Variance Portfolio
+   - Maximum Return Portfolio
+   - Efficient Frontier calculation
 
-The script also computes and visualizes the **Efficient Frontier**, which represents the set of optimal portfolios along the risk-return spectrum.
+2. **Risk Analytics** with multiple VaR methodologies:
+   - Parametric VaR
+   - Historical VaR
+   - Monte Carlo VaR
+   - Modified (Cornish-Fisher) VaR
+   - Conditional VaR (Expected Shortfall)
+   - Portfolio VaR
+   - VaR backtesting
+
+The framework uses object-oriented design with `PortfolioOptimizer` and `RiskAnalytics` classes for modular, reusable code.
 
 ## 🎯 Key Features
 
-- ✅ Automated package installation for Google Colab
-- ✅ Real-time data retrieval from Supabase
-- ✅ Multiple portfolio optimization strategies
-- ✅ Efficient frontier calculation
-- ✅ Interactive Plotly visualizations
-- ✅ Comprehensive portfolio statistics
-- ✅ Support for equities, ETFs, commodities, forex, and crypto assets
+- ✅ **Data Retrieval**: Yahoo Finance integration with yfinance for historical price data
+- ✅ **Flexible Date Ranges**: Specify custom start/end dates for analysis periods
+- ✅ **Multiple Asset Classes**: Support for equities, ETFs, commodities, forex, and crypto
+- ✅ **Convex Optimization**: CVXPY-based portfolio optimization with multiple solvers
+- ✅ **Risk Management**: Comprehensive VaR calculations with statistical backtesting
+- ✅ **Interactive Visualizations**: Plotly charts for efficient frontier and portfolio compositions
+- ✅ **Modular Architecture**: Separate classes for optimization and risk analysis
+- ✅ **Statistical Testing**: Normality tests and distribution analysis
 
 ## 📚 Theoretical Background
 
 ### Modern Portfolio Theory (MPT)
 
-Modern Portfolio Theory, introduced by Harry Markowitz, is based on the principle that investors can construct portfolios that achieve optimal risk-return characteristics.
+Modern Portfolio Theory, introduced by Harry Markowitz, optimizes portfolios based on expected returns and risk.
 
 **Key Concepts:**
 
 #### Expected Portfolio Return
 $$\mu_p = w^T \cdot \mu$$
 
-Where:
-- $w$ = vector of portfolio weights
-- $\mu$ = vector of expected asset returns
-
 #### Portfolio Variance
 $$\sigma_p^2 = w^T \cdot \Sigma \cdot w$$
-
-Where:
-- $\Sigma$ = covariance matrix of asset returns
 
 #### Sharpe Ratio
 $$SR = \frac{\mu_p - r_f}{\sigma_p}$$
 
-Where:
-- $r_f$ = risk-free rate
+### Value at Risk (VaR)
+
+VaR measures the maximum potential loss over a specific time horizon at a given confidence level.
+
+**VaR Methodologies:**
+- **Parametric**: Assumes normal distribution
+- **Historical**: Uses empirical distribution
+- **Monte Carlo**: Simulation-based
+- **Modified**: Adjusts for skewness and kurtosis
+
+## 🚀 Installation
+
+```bash
+pip install numpy pandas cvxpy yfinance plotly scipy quantmod tabulate
+```
+
+## 💡 Usage
+
+### Basic Portfolio Optimization
+
+```python
+from portfolio_optimizer import PortfolioOptimizer
+
+# Define instruments
+instruments = [
+    {"symbol": "AAPL", "name": "Apple Inc", ...},
+    # Add more instruments
+]
+
+# Create optimizer
+optimizer = PortfolioOptimizer(instruments, return_target=0.1)
+
+# Load data
+optimizer.load_data()
+
+# Compute statistics
+optimizer.compute_statistics()
+
+# Optimize portfolios
+msr_weights = optimizer.optimize_max_sharpe()
+mv_weights = optimizer.optimize_min_variance()
+mr_weights = optimizer.optimize_max_return()
+
+# Visualize results
+ef_port = optimizer.calculate_efficient_frontier()
+optimizer.visualize(ef_port, msr_weights, mv_weights, mr_weights)
+```
+
+### Risk Analytics
+
+```python
+from risk_analytics import RiskAnalytics
+
+# Initialize with returns data
+ra = RiskAnalytics(returns=optimizer.returns)
+
+# Calculate VaR for optimized portfolios
+msr_var = ra.portfolio_var(msr_weights)
+ra.print_var_table(msr_var, "MSR Portfolio VaR")
+```
+
+### Combined Workflow
+
+```python
+from portfolio_optimizer import main
+main()  # Runs complete optimization + risk analysis
+```
+
+## 📊 Output
+
+The framework generates:
+- Optimized portfolio weights for different strategies
+- Efficient frontier visualization
+- VaR estimates at 90%, 95%, and 99% confidence levels
+- Statistical backtesting results
+- Interactive Plotly charts
+
+## 🔧 Configuration
+
+- **Date Range**: Modify `start_date` and `end_date` in `PortfolioOptimizer`
+- **Confidence Levels**: Adjust in `RiskAnalytics` initialization
+- **Risk-Free Rate**: Set in `PortfolioOptimizer` for Sharpe ratio
+- **VaR Methods**: Choose from parametric, historical, Monte Carlo, modified
+
+## 📈 Supported Assets
+
+- Equities (stocks)
+- ETFs
+- Commodities
+- Forex pairs
+- Cryptocurrencies
+
+## 🤝 Contributing
+
+This project combines portfolio theory with practical risk management tools. The modular design allows for easy extension with additional optimization constraints or risk metrics.
+
+## 📚 References
+
+- Markowitz, H. (1952). Portfolio Selection
+- Jorion, P. (2007). Value at Risk: The New Benchmark for Managing Financial Risk
+- CVXPY Documentation: https://www.cvxpy.org/
+- yfinance Documentation: https://pypi.org/project/yfinance/
+
+---
+
+**Note**: This framework is for educational and research purposes. Always consult with financial professionals before making investment decisions.
 
 ### Optimization Problems
 
