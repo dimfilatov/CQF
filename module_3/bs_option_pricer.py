@@ -8,60 +8,65 @@ import quantmod.charts
 from datetime import datetime
 
 class BlackScholesOptionPricer:
-    def __init__(self, S, K, T, t, r, sigma, dividend):
+    def __init__(self, S, K, T, t, r, sigma, dividend=0, T_f=None):
         self.S = S  # Current stock price
         self.K = K  # Strike price
-        self.T = T  # Time to maturity
+        self.T = T  # Option maturity time
         self.t = t  # Current time
-        self.tau = self.T - self.t  # Time to maturity
+        self.T_f = T_f  # Time of futures delivery (optional)
+        self.tau = self.T - self.t  # Time to option maturity
+        self.tau_f = self.T_f - self.t if self.T_f is not None else None
         self.r = r  # Risk-free rate
         self.dividend = dividend  # Dividend yield
         self.sigma = sigma  # Volatility
         self.d1 = (np.log(self.S/self.K) + (self.r - self.dividend + 0.5 * self.sigma**2) * self.tau) / (self.sigma * np.sqrt(self.tau))
         self.d2 = self.d1 - self.sigma * np.sqrt(self.tau)
 
-    def simulate_GBM_paths(self, n_pths, n_steps, method):
+    def simulate_GBM_paths(self, n_pths, n_steps, method, asset_type=None):
         dt = self.tau / n_steps
+        paths = {}
         paths = np.zeros((n_pths, n_steps+1))
-        paths[:, 0] = self.S
 
-        if method == 'naive':
-            for t in range(1, n_steps+1):
-                z = np.random.standard_normal(n_pths)
-                paths[:, t] = paths[:, t-1] * (1 + (self.r - self.dividend) * dt + self.sigma * np.sqrt(dt) * z)
-        elif method == 'exact':
-            for t in range(1, n_steps + 1):
-                z = np.random.standard_normal(n_pths)
-                paths[:, t] = paths[:, t-1] * np.exp((self.r - self.dividend - 0.5 * self.sigma **2) * dt + self.sigma * np.sqrt(dt) * z)
-        elif method == 'moment_matcing':
-            z = np.random.standard_normal(n_pths)
-            z_std = (z-np.mean(z)) / np.std(z)
-            S_T = self.S * np.exp((self.r - self.dividend - 0.5 * self.sigma**2) * self.tau + self.sigma * np.sqrt(self.tau) * z_std)
-        elif method == 'antithetic':
-            z = np.random.standard_normal(n_pths//2)
-            z_anti = -z 
-            S_T = self.S * np.exp((self.r - self.dividend - 0.5 * self.sigma**2) * self.tau + self.sigma * np.sqrt(self.tau) * z)
-            S_T_anti = self.S * np.exp((self.r - self.dividend - 0.5 * self.sigma**2) * self.tau + self.sigma * np.sqrt(self.tau) * z_anti)
-            S_T = np.concatenate((S_T, S_T_anti))
-        elif method == 'sobol':
-            # Generate Sobol samples in [0,1], then map to standard normal
-            sobol = qmc.Sobol(d=1, scramble=True)
-            u = sobol.random(n_pths)
-            z = norm.ppf(u.ravel())  # Inverse transform to standard normal
-            S_T = self.S * np.exp((self.r - self.dividend - 0.5 * self.sigma**2) * self.tau + self.sigma * np.sqrt(self.tau) * z)
+        if asset_type == 'stock':
+            paths[:, 0] = self.S
+            if method == 'naive':
+                for t in range(1, n_steps+1):
+                    z = np.random.standard_normal(n_pths)
+                    paths[:, t] = paths[:, t-1] * (1 + (self.r - self.dividend) * dt + self.sigma * np.sqrt(dt) * z)
 
-        if method not in ['moment_matcing', 'antithetic', 'sobol']:
-            S_T = paths[:, -1]          
+            elif method == 'exact':
+                for t in range(1, n_steps + 1):
+                    z = np.random.standard_normal(n_pths)
+                    paths[:, t] = paths[:, t-1] * np.exp((self.r - self.dividend - 0.5 * self.sigma **2) * dt + self.sigma * np.sqrt(dt) * z)
+            elif method == 'moment_matcing':
+                z = np.random.standard_normal(n_pths)
+                z_std = (z-np.mean(z)) / np.std(z)
+                S_T = self.S * np.exp((self.r - self.dividend - 0.5 * self.sigma**2) * self.tau + self.sigma * np.sqrt(self.tau) * z_std)
+            elif method == 'antithetic':
+                z = np.random.standard_normal(n_pths//2)
+                z_anti = -z 
+                S_T = self.S * np.exp((self.r - self.dividend - 0.5 * self.sigma**2) * self.tau + self.sigma * np.sqrt(self.tau) * z)
+                S_T_anti = self.S * np.exp((self.r - self.dividend - 0.5 * self.sigma**2) * self.tau + self.sigma * np.sqrt(self.tau) * z_anti)
+                S_T = np.concatenate((S_T, S_T_anti))
+            elif method == 'sobol':
+                # Generate Sobol samples in [0,1], then map to standard normal
+                sobol = qmc.Sobol(d=1, scramble=True)
+                u = sobol.random(n_pths)
+                z = norm.ppf(u.ravel())  # Inverse transform to standard normal
+                S_T = self.S * np.exp((self.r - self.dividend - 0.5 * self.sigma**2) * self.tau + self.sigma * np.sqrt(self.tau) * z)
+
+            if method not in ['moment_matcing', 'antithetic', 'sobol']:
+                S_T = paths[:, -1]    
         
         return S_T, paths
-    
+   
     def analytical_price(self):
         call_price = np.exp(-self.dividend * (self.tau)) * self.S * norm.cdf(self.d1) - self.K * np.exp(- self.r * (self.tau)) * norm.cdf(self.d2)
         put_price = self.K * np.exp(-self.r * (self.tau)) * norm.cdf(-self.d2) - np.exp(-self.dividend * (self.tau)) * self.S * norm.cdf(-self.d1)
         return call_price, put_price
     
     def monte_carlo_european_price(self, n_pths, n_steps, method):
-        S_T, paths = self.simulate_GBM_paths(n_pths, n_steps, method)
+        S_T, paths = self.simulate_GBM_paths(n_pths, n_steps, method, asset_type='stock')
         call_payoffs = np.maximum(S_T - self.K, 0)
         put_payoffs = np.maximum(self.K - S_T, 0)
         call_price = np.exp(- self.r * self.tau) * np.mean(call_payoffs)
@@ -69,7 +74,7 @@ class BlackScholesOptionPricer:
         return call_price, put_price
 
     def monte_carlo_asian_price(self, n_pths, n_steps, method):
-        S_T, paths = self.simulate_GBM_paths(n_pths, n_steps, method)
+        S_T, paths = self.simulate_GBM_paths(n_pths, n_steps, method, asset_type='stock')
         S_avg = np.mean(paths, axis = 1)
         payoffs_call = np.maximum(S_avg - self.K, 0)
         payoffs_put = np.maximum(self.K - S_avg, 0)
@@ -78,7 +83,7 @@ class BlackScholesOptionPricer:
         return call_price, put_price
     
     def monte_carlo_barrier_price(self, n_pths, n_steps, method, barrier, barrier_type, rebate):
-        S_T, paths = self.simulate_GBM_paths(n_pths, n_steps, method)
+        S_T, paths = self.simulate_GBM_paths(n_pths, n_steps, method, asset_type='stock')
         if barrier_type == "up_and_out":
             valid_paths = ~np.any(paths > barrier, axis=1)
         elif barrier_type == "down_and_out":
@@ -95,7 +100,25 @@ class BlackScholesOptionPricer:
         call_price = np.exp(-self.r * self.tau) * np.mean(payoffs_call)
         put_price = np.exp(-self.r * self.tau) * np.mean(payoffs_put)
         return call_price, put_price
+
+    def monte_carlo_binary_price(self, n_pths, n_steps, method):
+        S_T, paths = self.simulate_GBM_paths(n_pths, n_steps, method, asset_type='stock')
+        payoffs_call =np.where(S_T - self.K > 0, 1, 0)
+        payoffs_put = np.where(self.K-S_T > 0, 1,0)
+        call_price = np.exp(-self.r * self.tau) * np.mean(payoffs_call)
+        put_price = np.exp(-self.r * self.tau) * np.mean(payoffs_put)
+        return call_price, put_price
     
+    def monte_carlo_lookback_price(self, n_pths, n_steps, method):
+        S_T, paths = self.simulate_GBM_paths(n_pths, n_steps, method, asset_type='stock')
+        S_min = np.min(paths, axis=1)
+        S_max = np.max(paths, axis=1)
+        payoffs_call = np.maximum(S_T - S_min, 0)
+        payoffs_put = np.maximum(S_max - S_T, 0)
+        call_price = np.exp(-self.r * self.tau) * np.mean(payoffs_call)
+        put_price = np.exp(-self.r * self.tau) * np.mean(payoffs_put)
+        return call_price, put_price
+
     def plot_paths(self, n_pths, n_steps, method):
         S_T, paths = self.simulate_GBM_paths(n_pths, n_steps, method)
         plt.figure(figsize=(10,6))
@@ -161,6 +184,10 @@ def calculate_greeks_for_market_data(spot_price, ticker, maturity, strike_range,
     else:
         df = options.puts[(options.puts['strike'] >= strike_range[0]) & (options.puts['strike'] <= strike_range[1]   )].copy()
     df = df[['strike', 'lastPrice']]
+
+
+def get_today_date():
+    return datetime.today().strftime('%Y-%m-%d')
     # df.reset_index(drop=True, inplace=True)
 
     for idx, row in df.iterrows():
@@ -226,10 +253,24 @@ if __name__ == "__main__":
     S = 100
     K = 100
     T = 1
+    T_f = 2
     t = 0
     r = 0.05
     sigma = 0.2
     dividend = 0.02
     pricer = BlackScholesOptionPricer(S, K, T, t, r, sigma, dividend)
     pricer.compare_methods_against_analytical(n_pths=10000, n_steps=50)
-    calculate_greeks_for_market_data(spot_price=658, ticker="SPY", maturity="2026-03-30", strike_range=(650, 700), option_type='call', r=0.05, dividend=0.02)
+    calculate_greeks_for_market_data(spot_price=658, ticker="SPY", maturity=get_today_date(), strike_range=(650, 700), option_type='call', r=0.05, dividend=0.02)
+    
+    # calulate price of binary, barrier, asian and lookback options
+    call_price, put_price = pricer.monte_carlo_binary_price(n_pths=10000, n_steps=50, method='exact')
+    print(f"Binary Call Price: {call_price:.4f}, Binary Put Price: {put_price:.4f}")
+    call_price, put_price = pricer.monte_carlo_barrier_price(n_pths=10000, n_steps=50, method='exact', barrier=110, barrier_type='up_and_out', rebate=5)
+    print(f"Barrier Call Price: {call_price:.4f}, Barrier Put Price: {put_price:.4f}")
+    call_price, put_price = pricer.monte_carlo_asian_price(n_pths=10000, n_steps=50, method='exact')
+    print(f"Asian Call Price: {call_price:.4f}, Asian Put Price: {put_price:.4f}")
+    call_price, put_price = pricer.monte_carlo_lookback_price(n_pths=10000, n_steps=50, method='exact')
+    print(f"Lookback Call Price: {call_price:.4f}, Lookback Put Price: {put_price:.4f}")
+    # call_price, put_price = pricer.monte_carlo_futures_price(n_pths=10000, n_steps=50, method='exact')
+    # print(f"Futures Call Price: {call_price:.4f}, Futures Put Price: {put_price:.4f}")
+    
