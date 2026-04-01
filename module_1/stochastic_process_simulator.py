@@ -15,7 +15,7 @@ import numpy as np
 from typing import Optional
 import matplotlib.pyplot as plt
 
-class PriceSimulator:
+class StochasticProcessSimulator:
     """Simulate and plot asset price paths.
 
     Parameters
@@ -62,9 +62,8 @@ class PriceSimulator:
         """
         steps = int(steps)
         paths = int(paths)
-        dt = self.dt
-        drift = (self.mu - 0.5 * self.sigma ** 2) * dt
-        vol = self.sigma * np.sqrt(dt)
+        drift = (self.mu - 0.5 * self.sigma ** 2) * self.dt
+        vol = self.sigma * np.sqrt(self.dt)
 
         increments = np.random.normal(size=(steps, paths))
         log_returns = drift + vol * increments
@@ -80,15 +79,14 @@ class PriceSimulator:
         """
         steps = int(steps)
         paths = int(paths)
-        dt = self.dt
-        sqrt_dt = np.sqrt(dt)
+        sqrt_dt = np.sqrt(self.dt)
 
         S = np.empty((steps + 1, paths), dtype=float)
         S[0, :] = self.S0
         increments = np.random.normal(size=(steps, paths))
         for t in range(steps):
             dW = increments[t] * sqrt_dt
-            S[t + 1] = S[t] + self.mu * S[t] * dt + self.sigma * S[t] * dW
+            S[t + 1] = S[t] + self.mu * S[t] * self.dt + self.sigma * S[t] * dW
         return S
 
     def simulate_ou(self, steps: int = 252, paths: int = 1, theta: float = 1.0, mu_level: float = 0.0, sigma: float = 0.3, X0: Optional[float] = None) -> np.ndarray:
@@ -100,7 +98,6 @@ class PriceSimulator:
         """
         steps = int(steps)
         paths = int(paths)
-        dt = self.dt
         if X0 is None:
             X0 = mu_level
 
@@ -108,10 +105,35 @@ class PriceSimulator:
         X[0, :] = float(X0)
 
         normals = np.random.normal(size=(steps, paths))
-        sqrt_dt = np.sqrt(dt)
+        sqrt_dt = np.sqrt(self.dt)
         for t in range(steps):
             dW = normals[t] * sqrt_dt
-            X[t + 1] = X[t] + theta * (mu_level - X[t]) * dt + sigma * dW
+            X[t + 1] = X[t] + theta * (mu_level - X[t]) * self.dt + sigma * dW
+
+        return X
+
+    def simulate_cox_ingersoll_ross(self, steps, paths, theta, mu_level, sigma, X0=None):
+        """Simulate Cox-Ingersoll-Ross (CIR) process.
+
+        dX = theta*(mu_level - X) dt + sigma*sqrt(X) dW
+        Only uses approximate Euler-Maruyama.
+        Returns array shape (steps+1, paths).
+        """
+        steps = int(steps)
+        paths = int(paths)
+        if X0 is None:
+            X0 = mu_level
+
+        X = np.empty((steps + 1, paths), dtype=float)
+        X[0, :] = float(X0)
+
+        normals = np.random.normal(size=(steps, paths))
+        sqrt_dt = np.sqrt(self.dt)
+        for t in range(steps):
+            dW = normals[t] * sqrt_dt
+            sqrt_X_t = np.sqrt(np.maximum(X[t], 0))  # Ensure non-negativity for sqrt
+            X[t + 1] = X[t] + theta * (mu_level - X[t]) * self.dt + sigma * sqrt_X_t * dW
+            X[t + 1] = np.maximum(X[t + 1], 0)  # Ensure non-negativity
 
         return X
 
@@ -194,13 +216,17 @@ class PriceSimulator:
 
 if __name__ == '__main__':
     # quick demo when run as script
-    sim = PriceSimulator(S0=100, mu=0.05, sigma=0.2, seed=42)
+    sim = StochasticProcessSimulator(S0=100, mu=0.05, sigma=0.2, seed=42)
     p = sim.simulate_gbm(steps=252, paths=50, method='exact')
     sim.plot(p, title='Demo: GBM (50 paths)')
 
     # quick demo when run as script
-    p = sim.simulate_ou(steps=252, paths=10, theta=10.0, mu_level=0.05, sigma=0.03, X0=0.1)
-    sim.plot(p, title='Demo: OU (10 paths)')
+    p_ou = sim.simulate_ou(steps=252, paths=10, theta=10.0, mu_level=0.05, sigma=0.03, X0=0.1)
+    p_cir = sim.simulate_cox_ingersoll_ross(steps=252, paths=10, theta=10.0, mu_level=0.05, sigma=0.03, X0=0.1)
+    sim.plot(p_ou, title='Demo: OU (10 paths)')
+    sim.plot(p_cir, title='Demo: CIR (10 paths)')
 
     # quick demo when run as script
-    p = sim.simulate_correlated_euler(steps=252, paths=6, n_assets=2, mu=[0.05, 0.03], sigma=[0.2, 0.1], corr=[[1.0, 0.8], [0.8, 1.0]], S0=[100, 50])
+    p = sim.simulate_correlated_euler(steps=252, n_assets=2, n_paths=6, mu=[0.05, 0.03], sigma=[0.2, 0.1], corr=[[1.0, 0.8], [0.8, 1.0]], S0=[100, 50])
+    sim.plot(p[:, 0, :], title='Demo: Correlated GBM (Asset 1)')
+    sim.plot(p[:, 1, :], title='Demo: Correlated GBM (Asset 2)')
