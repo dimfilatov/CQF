@@ -33,25 +33,36 @@ Implements the Cox-Ross-Rubinstein binomial tree for pricing European and Americ
 
 ---
 
-## Assignment 3 — Stochastic Simulations
+## Assignment 3 — Stochastic Process Simulations
 
-Adds `price_simulator.py`, a notebook-friendly simulation helper for stochastic price models.
+Implements `stochastic_process_simulator.py`, a comprehensive library for simulating price and rate models commonly used in derivative pricing.
 
 - **Key features**:
-	- GBM (Geometric Brownian Motion): exact (log-normal) sampling and Euler–Maruyama discretization.
-	- Ornstein–Uhlenbeck (OU): exact discrete update and Euler option for mean-reverting dynamics.
-	- Correlated multi-asset Euler simulation using a Cholesky-decomposed correlation matrix.
-	- Plotting helpers for quick matplotlib visuals and optional Plotly conversion.
+	- **GBM (Geometric Brownian Motion)**: exact (log-normal) sampling and Euler–Maruyama discretization.
+	- **Ornstein–Uhlenbeck (OU)**: mean-reverting dynamics with Euler-Maruyama approximation.
+	- **Cox-Ingersoll-Ross (CIR)**: square-root process for short rate modeling with Euler-Maruyama approximation.
+	- **Correlated multi-asset Euler simulation**: using Cholesky-decomposed correlation matrix for modeling dependent assets.
+	- **Plotting helpers**: quick matplotlib visualization for simulation paths.
 
-- **File**: `price_simulator.py`
+- **File**: `stochastic_process_simulator.py`
+
+- **Main class**: `StochasticProcessSimulator`
 
 - **Quick notebook usage**:
 
 ```python
-from price_simulator import PriceSimulator
-sim = PriceSimulator(S0=100, mu=0.05, sigma=0.2, seed=42)
+from stochastic_process_simulator import StochasticProcessSimulator
+sim = StochasticProcessSimulator(S0=100, mu=0.05, sigma=0.2, seed=42)
 paths_exact = sim.simulate_gbm(steps=252, paths=10, method='exact')
 sim.plot(paths_exact, title='GBM (exact) — 10 paths')
+
+# OU process example
+paths_ou = sim.simulate_ou(steps=252, paths=10, theta=1.0, mu_level=0.05, sigma=0.03)
+sim.plot(paths_ou, title='OU process — 10 paths')
+
+# Correlated assets example
+paths_corr = sim.simulate_correlated_euler(steps=252, n_assets=2, n_paths=5, mu=[0.05, 0.03], sigma=[0.2, 0.1], corr=[[1.0, 0.8], [0.8, 1.0]], S0=[100, 50])
+sim.plot(paths_corr[:, 0, :], title='Correlated GBM (Asset 1)')
 ```
 
 ---
