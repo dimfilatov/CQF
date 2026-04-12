@@ -13,7 +13,7 @@ A Python project for option pricing using Black-Scholes analytics, Monte Carlo s
 - Monte Carlo pricing methods:
   - `naive`
   - `exact`
-  - `moment_matcing`
+  - `moment_matching`
   - `antithetic`
   - `sobol`
 - Monte Carlo pricing for:
@@ -23,7 +23,13 @@ A Python project for option pricing using Black-Scholes analytics, Monte Carlo s
   - Binary options
   - Lookback options
 - Greeks calculation for European options: Delta, Gamma, Vega, Theta, Rho
-- Implied volatility estimation via binary search
+- Implied volatility (IV) estimation using two methods:
+  - Binary search (`bisection_iv`)
+  - Newton's method with analytical vega (`newton_iv`) — faster and more efficient
+- Market data analysis:
+  - Greeks calculation for real market options with implied volatility
+  - Implied volatility term structure building across multiple maturities
+  - IV skew visualization
 - Finite-difference pricing using an explicit grid scheme
 - Visualization helpers for path plots, option value grids, and 3D surfaces
 
@@ -87,12 +93,13 @@ grid, s, t, intrinsic_values = option_price_with_finite_difference_method(
 plot_option_value(grid, s, t, intrinsic_values)
 ```
 
-### Implied Volatility
+### Implied Volatility Estimation
 
+#### Using Newton's Method (faster)
 ```python
-from bs_option_pricer import compute_IV_from_price
+from bs_option_pricer import newton_iv
 
-implied_vol = compute_IV_from_price(
+implied_vol = newton_iv(
     option_price=10.0,
     spot_price=100,
     option_type='call',
@@ -105,11 +112,86 @@ implied_vol = compute_IV_from_price(
 print(f"Implied volatility: {implied_vol:.4f}")
 ```
 
+#### Using Binary Search
+```python
+from bs_option_pricer import bisection_iv
+
+implied_vol = bisection_iv(
+    option_price=10.0,
+    spot_price=100,
+    option_type='call',
+    K=100,
+    T=1.0,
+    t=0.0,
+    r=0.05,
+    dividend=0.02
+)
+print(f"Implied volatility: {implied_vol:.4f}")
+```
+
+### Market Data Analysis
+
+#### Calculate Greeks for Market Options
+```python
+from bs_option_pricer import calculate_greeks_for_market_data
+from datetime import date
+
+maturity = date(2026, 4, 30)
+df = calculate_greeks_for_market_data(
+    spot_price=658,
+    ticker="SPY",
+    maturity=maturity,
+    strike_range=(650, 700),
+    option_type='call',
+    r=0.05,
+    dividend=0.02,
+    iv_method='newton'  # or 'bisection'
+)
+print(df)  # DataFrame with Implied Vol, Delta, Gamma, Vega, Theta, Rho
+```
+
+#### Build and Plot Implied Volatility Term Structure
+```python
+from bs_option_pricer import build_vol_term_structure, plot_vol_term_structure
+from datetime import date
+
+term_structure = build_vol_term_structure(
+    spot_price=658,
+    ticker="SPY",
+    t_start=date(2026, 4, 12),
+    t_end=date(2026, 5, 30),
+    strike_range=(650, 700),
+    option_type='call',
+    r=0.05,
+    dividend=0.02,
+    iv_method='newton'
+)
+plot_vol_term_structure(term_structure)
+```
+
+## Implementation Details
+
+### Implied Volatility Methods
+
+- **Newton's Method** (`newton_iv`): Uses analytical vega from Black-Scholes Greeks for faster convergence. Includes:
+  - Sigma bounds validation (0.001 to 5.0 = 0.1% to 500%)
+  - Robust convergence criteria with both absolute and relative tolerance
+  - Early termination if vega is near-zero
+  - Better performance for typical market option prices
+
+- **Binary Search** (`bisection_iv`): Robust but slower, guaranteed to converge
+
+### Term Structure Analysis
+
+- Filters available maturities based on date range and converts string dates to date objects
+- Applies requested IV method (Newton or bisection) for consistency
+- Returns strike-indexed Series for each maturity for easy visualization
+
 ## Notes
 
-- `calculate_greeks_for_market_data` is included in `bs_option_pricer.py` but its market-data workflow is partially implemented and may need additional completion.
 - `option_pricer_fdm.py` uses an explicit finite-difference scheme, so choose `NAS`, `T`, and `dt` carefully for numerical stability.
 - `quantmod` integration may require valid market access credentials or data availability.
+- Newton's method is recommended for IV calculation as it's ~10x faster than binary search when properly initialized.
 
 ## Getting Started
 
