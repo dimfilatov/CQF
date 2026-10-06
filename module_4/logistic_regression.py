@@ -93,9 +93,9 @@ class TrendPredictionLogisticRegression:
             df[f"LB{window}"] = lower_band
             df[f"UB{window}"] = upper_band
 
-        df["Label"] = np.where(lead(df["close"]) > df["close"], 1, 0)
+        # df["Label"] = np.where(lead(df["close"]) > df["close"], 1, 0)
         df["Label"] = np.where(lead(df["close"]) > 0.9950 * df["close"], 1, 0)
-        df["Label"] = np.where(lead(df["close"]) > df["UB7"], 1, 0)
+        # df["Label"] = np.where(lead(df["close"]) > df["UB7"], 1, 0)
 
         df.drop(["open", "high", "low", "close", "volume"], axis=1, inplace=True)
         df = df.dropna()
@@ -163,6 +163,35 @@ class TrendPredictionLogisticRegression:
 
         return self.model
 
+    def show_label_imbalance(self) -> pd.DataFrame:
+        """Show the label counts and percentages in the in- and out-of-sample sets."""
+        if self.y_train.empty or self.y_test.empty:
+            raise ValueError("The dataset must be split before checking label imbalance.")
+
+        labels = pd.Index(
+            pd.concat([self.y_train, self.y_test], ignore_index=True).unique()
+        )
+        rows = []
+        for split_name, labels_in_split in (
+            ("in-sample", self.y_train),
+            ("out-of-sample", self.y_test),
+        ):
+            counts = labels_in_split.value_counts().reindex(labels, fill_value=0)
+            for label, count in counts.items():
+                rows.append(
+                    {
+                        "split": split_name,
+                        "label": label,
+                        "count": int(count),
+                        "percentage": count / len(labels_in_split) * 100,
+                    }
+                )
+
+        report = pd.DataFrame(rows)
+        print("Label distribution:")
+        print(report.to_string(index=False, formatters={"percentage": "{:.2f}%".format}))
+        return report
+
     def evaluate(self) -> Dict[str, float]:
         if self.model is None:
             raise ValueError("The model must be fit before calling evaluate().")
@@ -229,6 +258,9 @@ class TrendPredictionLogisticRegression:
         cumulative_benchmark = (1 + signal_frame["Returns"]).cumprod() - 1
 
         sharpe = (signal_frame["Strategy"].mean() / signal_frame["Strategy"].std()) * np.sqrt(252)
+        benchmark_sharpe = (
+            signal_frame["Returns"].mean() / signal_frame["Returns"].std()
+        ) * np.sqrt(252)
         total_return = cumulative_strategy.iloc[-1]
         benchmark_return = cumulative_benchmark.iloc[-1]
         max_drawdown = (cumulative_strategy - cumulative_strategy.cummax()).min()
@@ -236,6 +268,7 @@ class TrendPredictionLogisticRegression:
         signal_frame["Strategy_Cum"] = cumulative_strategy
         signal_frame["Benchmark_Cum"] = cumulative_benchmark
         signal_frame["Sharpe"] = sharpe
+        signal_frame["Benchmark_Sharpe"] = benchmark_sharpe
         signal_frame["Total_Return"] = total_return
         signal_frame["Benchmark_Return"] = benchmark_return
         signal_frame["Max_Drawdown"] = max_drawdown
@@ -245,6 +278,7 @@ class TrendPredictionLogisticRegression:
         self.load_data()
         self.prepare_dataset()
         self.split_data()
+        label_imbalance = self.show_label_imbalance()
         self.fit()
         self.evaluate()
         self.plot_confusion_matrix()
@@ -255,6 +289,7 @@ class TrendPredictionLogisticRegression:
             "data": self.df,
             "features": self.X,
             "labels": self.y,
+            "label_imbalance": label_imbalance,
             "model": self.model,
             "metrics": self.metric_summary,
             "strategy": strategy,
@@ -279,6 +314,9 @@ def main() -> None:
     print("Training metrics:")
     for key, value in result["metrics"].items():
         print(f"  {key}: {value:.4f}")
+
+    for key in ["Sharpe", "Benchmark_Sharpe", "Total_Return", "Benchmark_Return", "Max_Drawdown"]:
+        print(f"{key}: {result['strategy'][key].iloc[-1]:.4f}")
     print("\nCompleted logistic regression trend prediction workflow.")
 
 
