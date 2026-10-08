@@ -46,6 +46,20 @@ This module provides a comprehensive framework for pricing various option types 
 ### Files:
 - `bs_option_pricer.py`
 
+## Module 4: Machine Learning
+
+This module contains examples of optimization, regression, classification,
+feature selection, decision trees, and boosting.
+
+### Key Components:
+- **Regression and Optimization**: Linear regression model comparisons, logistic regression, and batch gradient descent
+- **Classification**: K-nearest neighbors, loan-status decision-tree classification, and market-trend logistic and XGBoost classifiers
+- **Boosting**: A from-scratch residual-based regression boosting example and an XGBoost classification workflow with randomized hyperparameter search and time-series cross-validation
+- **Feature Preparation and Selection**: Percentile-based outlier clipping, correlation filtering, VIF, SelectKBest, RFE, and RFECV
+- **Model Evaluation**: Classification and regression metrics, visualizations, and a basic trading-signal analysis
+
+See [`module_4/README.md`](./module_4/README.md) for an inventory of the Python modules and a detailed explanation of estimation, prediction, boosting formulas, parameter search, and the distinction between logloss and ROC-AUC.
+
 ## Requirements
 
 - Python 3.x
