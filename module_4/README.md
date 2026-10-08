@@ -46,9 +46,34 @@ or learning-rate/shrinkage parameter in this implementation.
    ensemble, its newest tree contribution, and the residuals before and after
    that contribution.
 
-With squared-error loss, fitting a regression tree to residuals corresponds
-to fitting the negative gradient of the loss. The model's prediction after
-`m` trees is the sum of the individual tree predictions:
+Why do residuals represent the negative gradient? Let `F(x)` be the current
+prediction for an observation with target `y`. Use half the squared error as
+the loss:
+
+`L(y, F) = 1/2 * (y - F)^2`
+
+Differentiating with respect to the current prediction gives:
+
+`dL/dF = F - y`
+
+The negative gradient is therefore:
+
+`-dL/dF = y - F = residual`
+
+So, at each later stage, fitting a regression tree to `y - F(x)` is fitting
+the direction in prediction space that most reduces squared loss locally.
+For a leaf whose observations have residuals `r_i`, the constant prediction
+that minimizes their squared errors is their mean residual,
+`leaf_value = mean(r_i)`. The tree partitions feature space into leaves so
+that adding these leaf values reduces the overall residual error.
+
+For example, if an observation has `y = 10` and the current ensemble predicts
+`F(x) = 7`, its residual is `3`; the next tree is trained to add about `3`
+for observations in a similar region. If the current prediction is `12`, its
+residual is `-2`, so the next tree should pull that region's prediction down.
+
+The model's prediction after `m` trees is the sum of the individual tree
+predictions:
 
 `F_m(x) = T_1(x) + T_2(x) + ... + T_m(x)`
 
@@ -94,9 +119,79 @@ out of model selection and is used for final evaluation.
 An XGBoost classifier constructs trees sequentially. Internally, its binary
 logistic objective evaluates the current model's prediction errors using
 gradients and Hessians, and new tree splits are selected to improve the
-objective while accounting for regularization. The classifier's raw tree
-scores are converted to class probabilities; the probability for class `1`
-is the model's estimate of the positive label for a row.
+objective while accounting for regularization. Gradients and Hessians do not
+directly report a row's classification error. Instead, they describe how
+the loss changes as the model's raw score changes, and how curved that loss
+is locally; XGBoost uses them to choose useful splits and leaf values.
+
+For binary logistic classification, let `z_i` be the model's raw score
+(margin) for row `i`, and convert it to a probability with the sigmoid:
+
+`p_i = sigmoid(z_i) = 1 / (1 + exp(-z_i))`
+
+For label `y_i` in `{0, 1}`, the binary logloss for one row is:
+
+`l_i = -[y_i * log(p_i) + (1 - y_i) * log(1 - p_i)]`
+
+If the row has sample weight `w_i`, its contribution is `w_i * l_i`.
+Differentiating this loss with respect to the raw score gives the first and
+second derivatives used by XGBoost:
+
+`g_i = w_i * (p_i - y_i)`
+
+`h_i = w_i * p_i * (1 - p_i)`
+
+The gradient `g_i` gives the local direction of loss change. If `y_i=1` and
+`p_i=0.8`, then `g_i=-0.2*w_i`: increasing the raw score (and thus the
+probability) locally lowers the loss. If `y_i=0` and `p_i=0.8`, then
+`g_i=0.8*w_i`: the score should move down. The Hessian `h_i` is the local
+curvature; for logistic loss it is largest near `p_i=0.5` and approaches
+zero as `p_i` approaches 0 or 1. The pair `(g_i, h_i)` lets XGBoost form a
+second-order approximation to the effect of adding a tree, rather than
+trying every possible change in prediction directly.
+
+At boosting round `t`, a new tree contributes `f_t(x_i)` to the current
+margin. A second-order Taylor expansion of the loss around the current margin
+approximates the change in training objective as:
+
+`sum_i [g_i * f_t(x_i) + 1/2 * h_i * f_t(x_i)^2] + Omega(f_t)`
+
+Here `Omega(f_t)` penalizes tree complexity. In the simplified L2-only case,
+`Omega` includes a penalty `1/2 * lambda * sum_j (w_j)^2`, where `w_j` is
+the score assigned to leaf `j`; XGBoost also uses split penalties such as
+`gamma`. This approximation explains how derivatives connect predictions
+to tree fitting: a candidate tree is scored by how much it is expected to
+lower the objective locally, after its complexity penalty.
+
+For a candidate leaf containing rows `I`, aggregate the derivatives:
+
+`G = sum(g_i for i in I)` and `H = sum(h_i for i in I)`
+
+With L2 leaf regularization `lambda` and no L1 penalty, the optimal constant
+leaf score follows by minimizing the leaf's approximate objective
+`G * w + 1/2 * (H + lambda) * w^2` with respect to `w`:
+
+`leaf_score = -G / (H + lambda)`
+
+Substituting this value back gives the leaf's improvement score (ignoring
+terms common to both tree structures):
+
+`score(I) = 1/2 * G^2 / (H + lambda)`
+
+For a proposed split into left and right children, XGBoost's gain is:
+
+`Gain = 1/2 * [G_L^2/(H_L + lambda) + G_R^2/(H_R + lambda) - G^2/(H + lambda)] - gamma`
+
+Here `G` and `H` are for the parent and `G_L`, `H_L`, `G_R`, and `H_R` are
+for its children. A split is useful when this gain is positive and its
+children also meet `min_child_weight`. Thus the derivatives turn the loss
+into a numerical criterion for both the amount a leaf should adjust scores
+and whether a split is worth adding.
+
+The classifier's raw tree scores (margins) are converted to class
+probabilities; the probability for class `1` is the model's estimated
+positive-class probability. A class prediction is then made from the
+probability using the classifier's decision threshold.
 
 Before fitting, the module calculates balanced sample weights from the
 training labels. These increase the training contribution of observations
@@ -112,6 +207,27 @@ meaning of predicted probabilities or the ROC-AUC metric.
 - `random_state=42` for repeatable parameter sampling.
 - `refit=True`, so after selection the winning parameter combination is
   fitted again on all of the outer training data.
+
+There are two different optimization/evaluation roles here:
+
+1. **Within each XGBoost fit, the training objective is regularized binary
+   logistic loss.** `XGBClassifier` uses the binary logistic objective by
+   default. Its tree-building algorithm uses the logloss derivatives above
+   to find score updates and splits, while penalizing model complexity. The
+   model is trained to improve this objective; it does not train by directly
+   maximizing ROC-AUC.
+2. **Across candidate parameter combinations, the search score is ROC-AUC.**
+   `RandomizedSearchCV(scoring="roc_auc")` computes ROC-AUC on each
+   chronological validation fold and chooses the combination with the
+   highest mean fold score. ROC-AUC measures ranking quality across
+   thresholds, rather than the quality of one fixed threshold. It is a
+   selection metric here, not the differentiable loss used to build trees.
+
+The explicit `eval_metric="logloss"` passed to `_make_model()` is XGBoost's
+evaluation metric for any supplied evaluation set. This implementation
+doesn't pass an `eval_set` to `.fit()`, so it does not drive early stopping
+or parameter selection in the current workflow. The CV selection metric is
+separately set by `RandomizedSearchCV` to ROC-AUC.
 
 The dictionary `SEARCH_PARAM_DISTRIBUTIONS` provides the candidate values for
 the randomized search:
@@ -132,8 +248,19 @@ The search optimizes ROC-AUC, which measures how well the scores rank positive
 examples above negative examples across thresholds; it does not select a
 classification threshold.
 
-Parameters not in the search dictionary are fixed by `_make_model()` or by
-XGBoost defaults. The explicit fixed settings are `verbosity=0`,
+The search only selects the parameters listed in
+`SEARCH_PARAM_DISTRIBUTIONS`, based on mean CV ROC-AUC. In that dictionary,
+`gamma` and `min_child_weight` regularize tree growth by rejecting weak or
+insufficiently supported splits; `max_depth`, `colsample_bytree`, and
+`n_estimators` also constrain model complexity. Other regularization
+parameters are not searched. For example, XGBoost's `reg_lambda` (the `lambda`
+in the leaf formula above) stays at its library default unless explicitly
+overridden, as does `reg_alpha` (L1 regularization). Therefore this search
+does not find a universal or joint optimum for every XGBoost regularizer: it
+finds the best of five sampled combinations under the stated CV score, with
+the unlisted settings held fixed.
+
+Other settings fixed by `_make_model()` are `verbosity=0`,
 `eval_metric="logloss"`, `random_state=42`, and `n_jobs=1`. The search itself
 uses `n_jobs=-1` to parallelize candidate/fold fits.
 
