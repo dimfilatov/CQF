@@ -9,7 +9,6 @@ may also require the optional `quantmod` package or external data access.
 
 | Module | Summary |
 | --- | --- |
-| `decision_tree.py` | Empty placeholder; it currently contains no implementation. |
 | `feature_selection.py` | Demonstrates regression feature selection using variance inflation factor (VIF), `SelectKBest` with an F-test, recursive feature elimination (RFE), and cross-validated RFE (RFECV). It fits a linear-regression pipeline to the selected features and reports its in-sample R-squared. |
 | `gradient_boosting.py` | Builds an XGBoost binary classifier for next-period SPY price direction. It engineers rolling return and volatility features, uses time-ordered train/test and cross-validation splits, searches hyperparameters, and reports classification metrics and plots. See the detailed walkthrough below. |
 | `gradient_descent.py` | Generates synthetic data from a linear relationship with Gaussian noise, estimates the coefficients using batch gradient descent on mean squared error, and plots the loss history. |
