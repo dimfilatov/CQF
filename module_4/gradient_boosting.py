@@ -16,8 +16,19 @@ from sklearn.metrics import (
     RocCurveDisplay,
     roc_auc_score,
 )
+from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier, plot_importance
+
+
+SEARCH_PARAM_DISTRIBUTIONS = {
+    "learning_rate": [0.05, 0.10, 0.15, 0.20, 0.25, 0.30],
+    "max_depth": [3, 4, 5, 6, 8, 10, 12, 15],
+    "min_child_weight": [1, 3, 5, 7],
+    "gamma": [0.0, 0.1, 0.2, 0.3, 0.4],
+    "colsample_bytree": [0.3, 0.4, 0.5, 0.7],
+    "n_estimators": [100, 200, 300],
+}
 
 
 class GradientBoostingTrendClassifier:
@@ -32,36 +43,15 @@ class GradientBoostingTrendClassifier:
         self.data_path = data_path
         self.start_date = start_date
         self.test_size = test_size
-        self.df = pd.DataFrame()
-        self.feature_frame = pd.DataFrame()
-        self.X = pd.DataFrame()
-        self.y = pd.Series(dtype="int64")
-        self.X_train = pd.DataFrame()
-        self.X_test = pd.DataFrame()
-        self.y_train = pd.Series(dtype="int64")
-        self.y_test = pd.Series(dtype="int64")
-        self.model: Any = None
-        self.feature_names = []
-        self.metric_summary: Dict[str, float] = {}
-        self.classification_summary: Dict[str, Any] = {}
 
     def load_data(self) -> pd.DataFrame:
         data = pd.read_csv(self.data_path, index_col=0, parse_dates=True)
-        if "Adj Close" not in data.columns:
-            raise ValueError("The input CSV must contain an 'Adj Close' column.")
-        if not isinstance(data.index, pd.DatetimeIndex):
-            raise ValueError("The input CSV index must contain dates.")
-
         self.df = data.sort_index().loc[self.start_date:].copy()
-        if self.df.empty:
-            raise ValueError(f"No observations found on or after {self.start_date!r}.")
         return self.df
 
     @staticmethod
     def create_features(frame: pd.DataFrame) -> pd.DataFrame:
         """Create rolling return/volatility features and the next-period label."""
-        if "Adj Close" not in frame.columns:
-            raise ValueError("The input data must contain an 'Adj Close' column.")
 
         df = frame.copy()
         df["Returns"] = np.log(df["Adj Close"]).diff()
@@ -92,25 +82,15 @@ class GradientBoostingTrendClassifier:
         self.X = self.feature_frame.drop(columns=excluded_columns, errors="ignore")
         self.y = self.feature_frame["Label"]
         self.feature_names = list(self.X.columns)
-        if self.X.empty or not self.feature_names:
-            raise ValueError("Feature creation produced no usable observations.")
         return self.X
 
     def split_data(self) -> None:
-        if not 0 < self.test_size < 1:
-            raise ValueError("test_size must be between 0 and 1.")
         split_at = int(len(self.X) * (1 - self.test_size))
-        if split_at <= 0 or split_at >= len(self.X):
-            raise ValueError("Not enough observations for the requested train/test split.")
-
         self.X_train, self.X_test = self.X.iloc[:split_at], self.X.iloc[split_at:]
         self.y_train, self.y_test = self.y.iloc[:split_at], self.y.iloc[split_at:]
 
     def show_label_imbalance(self) -> pd.DataFrame:
         """Print and return label counts and percentages for both data splits."""
-        if self.y_train.empty or self.y_test.empty:
-            raise ValueError("The dataset must be split before checking label imbalance.")
-
         labels = pd.Index(pd.concat([self.y_train, self.y_test]).unique())
         rows = []
         for split_name, target in (
@@ -144,6 +124,8 @@ class GradientBoostingTrendClassifier:
         model_parameters = {
             "verbosity": 0,
             "eval_metric": "logloss",
+            "random_state": 42,
+            "n_jobs": 1,
         }
         if parameters:
             model_parameters.update(parameters)
@@ -153,25 +135,39 @@ class GradientBoostingTrendClassifier:
         self.model = self._make_model()
         return self.model
 
-    def fit(self) -> Any:
-        if self.X_train.empty or self.y_train.empty:
-            raise ValueError("The dataset must be split before fitting the model.")
-
-        model = self.build_model()
+    def tune_model(
+        self,
+        n_iter: int = 5,
+        cv_splits: int = 5,
+        cv_gap: int = 1,
+    ) -> RandomizedSearchCV:
         sample_weights = compute_sample_weight(
             class_weight="balanced",
             y=self.y_train,
         )
-        model.fit(self.X_train, self.y_train, sample_weight=sample_weights)
-        self.model = model
+        self.search = RandomizedSearchCV(
+            estimator=self._make_model(),
+            param_distributions=SEARCH_PARAM_DISTRIBUTIONS,
+            n_iter=n_iter,
+            scoring="roc_auc",
+            cv=TimeSeriesSplit(n_splits=cv_splits, gap=cv_gap),
+            n_jobs=-1,
+            refit=True,
+            random_state=42,
+        )
+        self.search.fit(
+            self.X_train,
+            self.y_train,
+            sample_weight=sample_weights,
+        )
+        self.model = self.search.best_estimator_
+        return self.search
+
+    def fit(self) -> Any:
+        self.tune_model()
         return self.model
 
-    def _require_fitted_model(self) -> None:
-        if self.model is None:
-            raise ValueError("The model must be fit before evaluation or plotting.")
-
     def evaluate(self) -> Dict[str, float]:
-        self._require_fitted_model()
         train_predictions = self.model.predict(self.X_train)
         test_predictions = self.model.predict(self.X_test)
         test_probabilities = self.model.predict_proba(self.X_test)
@@ -204,7 +200,6 @@ class GradientBoostingTrendClassifier:
         return metrics
 
     def plot_confusion_matrix(self) -> None:
-        self._require_fitted_model()
         disp = ConfusionMatrixDisplay.from_estimator(
             self.model,
             self.X_test,
@@ -216,7 +211,6 @@ class GradientBoostingTrendClassifier:
         plt.show()
 
     def plot_roc_curve(self) -> None:
-        self._require_fitted_model()
         disp = RocCurveDisplay.from_estimator(
             self.model,
             self.X_test,
@@ -228,7 +222,6 @@ class GradientBoostingTrendClassifier:
         plt.show()
 
     def plot_precision_recall_curve(self) -> None:
-        self._require_fitted_model()
         disp = PrecisionRecallDisplay.from_estimator(
             self.model,
             self.X_test,
@@ -239,7 +232,6 @@ class GradientBoostingTrendClassifier:
         plt.show()
 
     def plot_feature_importance(self, importance_type: str = "gain") -> None:
-        self._require_fitted_model()
         plot_importance(
             self.model,
             importance_type=importance_type,
@@ -273,6 +265,11 @@ class GradientBoostingTrendClassifier:
             "model": self.model,
             "metrics": metrics,
             "classification_report": self.classification_summary,
+            "best_params": self.search.best_params_,
+            "best_cv_roc_auc": self.search.best_score_,
+            "best_cv_roc_auc_std": self.search.cv_results_["std_test_score"][
+                self.search.best_index_
+            ],
         }
 
     def __repr__(self) -> str:
@@ -291,6 +288,11 @@ def main() -> None:
     print("Model metrics:")
     for key, value in result["metrics"].items():
         print(f"  {key}: {value:.4f}")
+    print(f"Best CV ROC-AUC: {result['best_cv_roc_auc']:.4f}")
+    print(f"CV ROC-AUC standard deviation: {result['best_cv_roc_auc_std']:.4f}")
+    print("Best parameters:")
+    for key, value in result["best_params"].items():
+        print(f"  {key}: {value}")
 
 
 if __name__ == "__main__":
