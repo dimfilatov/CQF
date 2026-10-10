@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,15 +18,15 @@ from sklearn.metrics import (
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier, plot_importance
-from data_handler import DataHandler
 from ModelConfiguration import ModelConfiguration
+from utils import split_data
 
-
-class GradientBoostingTrendClassifier:
+class MLClassifier:
     """XGBoost workflow for predicting next-period SPY price direction."""
 
     def __init__(self, X: pd.DataFrame, 
-                y: pd.Series, 
+                y: pd.Series,
+                features: List,
                 test_size: float,
                 search_params: Dict,
                 n_iter: int,
@@ -38,9 +38,8 @@ class GradientBoostingTrendClassifier:
                 n_jobs: int,
                 boosting_params: Dict
                 ) -> None:
-        self.X = X
-        self.y = y
-        self.test_size = test_size
+        self.X_train, self.X_test  = split_data(X[features], test_size)
+        self.y_train, self.y_test  = split_data(y, test_size)
         self.search_params = search_params
         self.n_iter = n_iter
         self.cv_splits = cv_splits
@@ -50,40 +49,6 @@ class GradientBoostingTrendClassifier:
         self.random_state = random_state
         self.n_jobs = n_jobs
         self.boosting_params = boosting_params
-
-    def split_data(self) -> None:
-        split_at = int(len(self.X) * (1 - self.test_size))
-        self.X_train, self.X_test = self.X.iloc[:split_at], self.X.iloc[split_at:]
-        self.y_train, self.y_test = self.y.iloc[:split_at], self.y.iloc[split_at:]
-
-    def show_label_imbalance(self) -> pd.DataFrame:
-        """Print and return label counts and percentages for both data splits."""
-        labels = pd.Index(pd.concat([self.y_train, self.y_test]).unique())
-        rows = []
-        for split_name, target in (
-            ("in-sample", self.y_train),
-            ("out-of-sample", self.y_test),
-        ):
-            counts = target.value_counts().reindex(labels, fill_value=0)
-            for label, count in counts.items():
-                rows.append(
-                    {
-                        "split": split_name,
-                        "label": label,
-                        "count": int(count),
-                        "percentage": count / len(target) * 100,
-                    }
-                )
-
-        report = pd.DataFrame(rows)
-        print("Label distribution:")
-        print(
-            report.to_string(
-                index=False,
-                formatters={"percentage": "{:.2f}%".format},
-            )
-        )
-        return report
 
     def tune_model(
         self
@@ -188,12 +153,38 @@ class GradientBoostingTrendClassifier:
         plt.tight_layout()
         plt.show()
 
+    def create_trading_signal(self, returns) -> pd.DataFrame:
+
+        signal_frame = self.X_test.copy()
+        signal_frame["Signal"] = self.model.predict(self.X_test)
+        signal_frame["RET"] = returns
+        signal_frame["Strategy"] = signal_frame["RET"] * signal_frame["Signal"].shift(1).fillna(0)
+        signal_frame.index = signal_frame.index.tz_localize("utc") if hasattr(signal_frame.index, "tz") else signal_frame.index
+
+        cumulative_strategy = (1 + signal_frame["Strategy"]).cumprod() - 1
+        cumulative_benchmark = (1 + signal_frame["RET"]).cumprod() - 1
+
+        sharpe = (signal_frame["Strategy"].mean() / signal_frame["Strategy"].std()) * np.sqrt(252)
+        benchmark_sharpe = (
+            signal_frame["RET"].mean() / signal_frame["RET"].std()
+        ) * np.sqrt(252)
+        total_return = cumulative_strategy.iloc[-1]
+        benchmark_return = cumulative_benchmark.iloc[-1]
+        max_drawdown = (cumulative_strategy - cumulative_strategy.cummax()).min()
+
+        signal_frame["Strategy_Cum"] = cumulative_strategy
+        signal_frame["Benchmark_Cum"] = cumulative_benchmark
+        signal_frame["Sharpe"] = sharpe
+        signal_frame["Benchmark_Sharpe"] = benchmark_sharpe
+        signal_frame["Total_Return"] = total_return
+        signal_frame["Benchmark_Return"] = benchmark_return
+        signal_frame["Max_Drawdown"] = max_drawdown
+        return signal_frame
+
     def run_full_pipeline(
         self,
-        show_plots: bool = True,
+        show_plots: bool = True
     ) -> Dict[str, Any]:
-        self.split_data()
-        label_imbalance = self.show_label_imbalance()
         self.fit()
         metrics = self.evaluate()
 
@@ -204,15 +195,10 @@ class GradientBoostingTrendClassifier:
             self.plot_feature_importance()
 
         return {
-            "features": self.X,
-            "labels": self.y,
-            "label_imbalance": label_imbalance,
             "model": self.model,
             "metrics": metrics,
             "classification_report": self.classification_summary,
             "best_params": self.search.best_params_,
             "best_cv_roc_auc": self.search.best_score_,
-            "best_cv_roc_auc_std": self.search.cv_results_["std_test_score"][
-                self.search.best_index_
-            ],
+            "best_cv_roc_auc_std": self.search.cv_results_["std_test_score"][self.search.best_index_]
         }

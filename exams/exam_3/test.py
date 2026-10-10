@@ -1,11 +1,11 @@
-from data_handler import DataHandler
+from data_engineering import DataEngineering
 from ModelConfiguration import ModelConfiguration
-from spy_signal_prediction import GradientBoostingTrendClassifier
+from ML_classifier import MLClassifier
 
 config_path = r"exams\exam_3\config.cfg"
 config = ModelConfiguration(config_path)
 config.load_params()
-data_handler = DataHandler(
+data_engineering= DataEngineering(
     yahoo_symbol=config.yahoo_symbol,
     start_date=config.start_date,
     test_size=config.test_size,
@@ -13,24 +13,29 @@ data_handler = DataHandler(
     windows=config.windows,
     vol_scale=config.vol_scale
 )
-data_handler.load_data()
-data_handler.data_summary()
-X, y = data_handler.create_features()
-data_handler.data_summary()
-model = GradientBoostingTrendClassifier(X=X, 
-                                        y=y,
-                                        test_size = config.test_size, 
-                                        search_params = config.search_params,
-                                        n_iter = config.n_iter,
-                                        cv_splits = config.cv_splits,
-                                        cv_gap = config.cv_gap,
-                                        verbosity = config.verbosity,
-                                        eval_metric=config.eval_metric,
-                                        random_state=config.random_state,
-                                        n_jobs=config.n_jobs,
-                                        boosting_params = config.boosting_params
-                                        )
+data_engineering.load_data()
+X, y = data_engineering.create_features()
+returns = data_engineering.create_returns()
+features = data_engineering.feature_engineering(config.feature_selection_methods, 
+                                                config.vif_threshold, 
+                                                config.n_features)
+
+data_engineering.summarize_engineered_data()
+model = MLClassifier(X=X, 
+                    y=y,
+                    features=features,
+                    test_size=config.test_size,
+                    search_params = config.search_params,
+                    n_iter = config.n_iter,
+                    cv_splits = config.cv_splits,
+                    cv_gap = config.cv_gap,
+                    verbosity = config.verbosity,
+                    eval_metric=config.eval_metric,
+                    random_state=config.random_state,
+                    n_jobs=config.n_jobs,
+                    boosting_params = config.boosting_params)
 result = model.run_full_pipeline()
+strategy = model.create_trading_signal(returns)
 print("Model metrics:")
 for key, value in result["metrics"].items():
     print(f"  {key}: {value:.4f}")
@@ -39,3 +44,7 @@ print(f"CV ROC-AUC standard deviation: {result['best_cv_roc_auc_std']:.4f}")
 print("Best parameters:")
 for key, value in result["best_params"].items():
     print(f"  {key}: {value}")
+
+for key in ["Sharpe", "Benchmark_Sharpe", "Total_Return", "Benchmark_Return", "Max_Drawdown"]:
+    print(f"{key}: {strategy[key].iloc[-1]:.4f}")
+    print("\nCompleted trend prediction workflow.")
