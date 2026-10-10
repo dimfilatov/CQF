@@ -99,9 +99,9 @@ class GradientBoostingTrendClassifier:
             n_iter=self.n_iter,
             scoring="roc_auc",
             cv=TimeSeriesSplit(n_splits=self.cv_splits, gap=self.cv_gap),
-            n_jobs=-1,
+            n_jobs=self.n_jobs,
             refit=True,
-            random_state=42,
+            random_state=self.random_state,
         )
         self.search.fit(
             self.X_train,
@@ -192,8 +192,6 @@ class GradientBoostingTrendClassifier:
         self,
         show_plots: bool = True,
     ) -> Dict[str, Any]:
-        self.load_data()
-        self.prepare_dataset()
         self.split_data()
         label_imbalance = self.show_label_imbalance()
         self.fit()
@@ -206,7 +204,6 @@ class GradientBoostingTrendClassifier:
             self.plot_feature_importance()
 
         return {
-            "data": self.df,
             "features": self.X,
             "labels": self.y,
             "label_imbalance": label_imbalance,
@@ -219,44 +216,3 @@ class GradientBoostingTrendClassifier:
                 self.search.best_index_
             ],
         }
-
-def main() -> None:
-    config_path = "config.cfg"
-    config = ModelConfiguration(config_path)
-    config.load_params()
-    data_handler = DataHandler(
-        symbol=config.symbol,
-        start_date=config.start_date,
-        test_size=config.test_size,
-        excluded_columns=config.excluded_columns,
-        windows=config.windows
-    )
-    data_handler.load_data()
-    X, y = data_handler.create_features()
-
-    model = GradientBoostingTrendClassifier(X=X, 
-                                            y=y,
-                                            test_size = config.test_size, 
-                                            search_params = config.search_params,
-                                            n_iter = config.n_iter,
-                                            cv_splits = config.cv_splits,
-                                            cv_gap = config.cv_gap,
-                                            verbosity = config.verbosity,
-                                            eval_metric=config.eval_metric,
-                                            random_state=config.random_state,
-                                            n_jobs=config.n_jobs,
-                                            boosting_params = config.boosting_params
-                                            )
-    result = model.run_full_pipeline()
-    print("Model metrics:")
-    for key, value in result["metrics"].items():
-        print(f"  {key}: {value:.4f}")
-    print(f"Best CV ROC-AUC: {result['best_cv_roc_auc']:.4f}")
-    print(f"CV ROC-AUC standard deviation: {result['best_cv_roc_auc_std']:.4f}")
-    print("Best parameters:")
-    for key, value in result["best_params"].items():
-        print(f"  {key}: {value}")
-
-
-if __name__ == "__main__":
-    main()
