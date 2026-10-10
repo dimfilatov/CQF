@@ -59,3 +59,8 @@ class ModelConfiguration:
             "random_state": self.random_state,
             "n_jobs": self.n_jobs,
         }
+
+        # feature engineering
+        self.feature_selection_methods = ast.literal_eval(config.get("feature_engineering", "feature_selection_methods"))
+        self.vif_threshold=config.getint("feature_engineering","vif_threshold")
+        self.n_features=config.getint("feature_engineering","n_features")
