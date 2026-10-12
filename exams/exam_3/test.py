@@ -1,8 +1,14 @@
 from data_engineering import DataEngineering
 from ModelConfiguration import ModelConfiguration
 from ML_classifier import MLClassifier
+from word_summary import (
+    Data_engineering_template,
+    data_engineering_word_summary,
+    feature_engineering_word_summary,
+    produce_label_imbalance_summary,
+)
 
-config_path = r"exams\exam_3\config.cfg"
+config_path = "config.cfg"
 config = ModelConfiguration(config_path)
 config.load_params()
 data_engineering= DataEngineering(
@@ -14,16 +20,22 @@ data_engineering= DataEngineering(
     vol_scale=config.vol_scale
 )
 data_engineering.load_data()
-X, y = data_engineering.create_features()
-returns = data_engineering.create_returns()
-features = data_engineering.feature_engineering(config.feature_selection_methods, 
-                                                config.vif_threshold, 
+Data_engineering_template(data_engineering)
+data_engineering.create_features()
+data_engineering.summarize_engineered_data()
+data_engineering.show_label_imbalance()
+data_engineering.drop_non_stationary_features()
+tomorrow_returns = data_engineering.create_returns()
+data_engineering_word_summary(data_engineering)
+produce_label_imbalance_summary(data_engineering)
+data_engineering.feature_engineering(config.feature_selection_methods, 
+                                                config.corr_threshold, 
                                                 config.n_features)
 
-data_engineering.summarize_engineered_data()
-model = MLClassifier(X=X, 
-                    y=y,
-                    features=features,
+feature_engineering_word_summary(data_engineering)
+model = MLClassifier(X=data_engineering.X, 
+                    y=data_engineering.y,
+                    features=data_engineering.features,
                     test_size=config.test_size,
                     search_params = config.search_params,
                     n_iter = config.n_iter,
@@ -35,7 +47,7 @@ model = MLClassifier(X=X,
                     n_jobs=config.n_jobs,
                     boosting_params = config.boosting_params)
 result = model.run_full_pipeline()
-strategy = model.create_trading_signal(returns)
+strategy = model.create_trading_signal(tomorrow_returns)
 print("Model metrics:")
 for key, value in result["metrics"].items():
     print(f"  {key}: {value:.4f}")
@@ -45,6 +57,15 @@ print("Best parameters:")
 for key, value in result["best_params"].items():
     print(f"  {key}: {value}")
 
-for key in ["Sharpe", "Benchmark_Sharpe", "Total_Return", "Benchmark_Return", "Max_Drawdown"]:
+for key in [
+    "Sharpe",
+    "Benchmark_Sharpe",
+    "Sortino",
+    "Benchmark_Sortino",
+    "Total_Return",
+    "Benchmark_Return",
+    "Max_Drawdown",
+    "Benchmark_Max_Drawdown",
+]:
     print(f"{key}: {strategy[key].iloc[-1]:.4f}")
-    print("\nCompleted trend prediction workflow.")
+print("\nCompleted trend prediction workflow.")

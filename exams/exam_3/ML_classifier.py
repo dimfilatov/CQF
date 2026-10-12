@@ -18,7 +18,6 @@ from sklearn.metrics import (
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier, plot_importance
-from ModelConfiguration import ModelConfiguration
 from utils import split_data
 
 class MLClassifier:
@@ -40,6 +39,7 @@ class MLClassifier:
                 ) -> None:
         self.X_train, self.X_test  = split_data(X[features], test_size)
         self.y_train, self.y_test  = split_data(y, test_size)
+        self.test_size = test_size
         self.search_params = search_params
         self.n_iter = n_iter
         self.cv_splits = cv_splits
@@ -153,32 +153,53 @@ class MLClassifier:
         plt.tight_layout()
         plt.show()
 
+    @staticmethod
+    def sortino_ratio(returns: pd.Series, periods_per_year: int = 252) -> float:
+        """Annualised Sortino ratio with a zero minimum acceptable return.
+
+        Downside deviation is sqrt(mean(min(r, 0)^2)) over all observations,
+        so days out of the market (zero return) stay in the denominator.
+        """
+        downside_deviation = np.sqrt((np.minimum(returns, 0.0) ** 2).mean())
+        return (returns.mean() / downside_deviation) * np.sqrt(periods_per_year)
+
+    @staticmethod
+    def max_drawdown(cumulative_returns: pd.Series) -> float:
+        """Worst peak-to-trough fall of a cumulative log-return curve."""
+        return (cumulative_returns - cumulative_returns.cummax()).min()
+
     def create_trading_signal(self, returns) -> pd.DataFrame:
 
         signal_frame = self.X_test.copy()
         signal_frame["Signal"] = self.model.predict(self.X_test)
-        signal_frame["RET"] = returns
-        signal_frame["Strategy"] = signal_frame["RET"] * signal_frame["Signal"].shift(1).fillna(0)
-        signal_frame.index = signal_frame.index.tz_localize("utc") if hasattr(signal_frame.index, "tz") else signal_frame.index
+        signal_frame["tomorrow_returns"] = returns
+        signal_frame["Strategy"] = signal_frame["tomorrow_returns"] * signal_frame["Signal"]
+        signal_frame.to_csv("trading_signal.csv")
 
-        cumulative_strategy = (1 + signal_frame["Strategy"]).cumprod() - 1
-        cumulative_benchmark = (1 + signal_frame["RET"]).cumprod() - 1
+        cumulative_strategy = signal_frame["Strategy"].cumsum()
+        cumulative_benchmark = signal_frame["tomorrow_returns"].cumsum()
 
         sharpe = (signal_frame["Strategy"].mean() / signal_frame["Strategy"].std()) * np.sqrt(252)
         benchmark_sharpe = (
-            signal_frame["RET"].mean() / signal_frame["RET"].std()
+            signal_frame["tomorrow_returns"].mean() / signal_frame["tomorrow_returns"].std()
         ) * np.sqrt(252)
         total_return = cumulative_strategy.iloc[-1]
         benchmark_return = cumulative_benchmark.iloc[-1]
-        max_drawdown = (cumulative_strategy - cumulative_strategy.cummax()).min()
+        max_drawdown = self.max_drawdown(cumulative_strategy)
+        benchmark_max_drawdown = self.max_drawdown(cumulative_benchmark)
+        sortino = self.sortino_ratio(signal_frame["Strategy"])
+        benchmark_sortino = self.sortino_ratio(signal_frame["tomorrow_returns"])
 
         signal_frame["Strategy_Cum"] = cumulative_strategy
         signal_frame["Benchmark_Cum"] = cumulative_benchmark
         signal_frame["Sharpe"] = sharpe
         signal_frame["Benchmark_Sharpe"] = benchmark_sharpe
+        signal_frame["Sortino"] = sortino
+        signal_frame["Benchmark_Sortino"] = benchmark_sortino
         signal_frame["Total_Return"] = total_return
         signal_frame["Benchmark_Return"] = benchmark_return
         signal_frame["Max_Drawdown"] = max_drawdown
+        signal_frame["Benchmark_Max_Drawdown"] = benchmark_max_drawdown
         return signal_frame
 
     def run_full_pipeline(

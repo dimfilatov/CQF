@@ -32,12 +32,16 @@ class ModelConfiguration:
             config.get("model", "colsample_bytree")
         )
         self.n_estimators = ast.literal_eval(config.get("model", "n_estimators"))
+        self.reg_alpha = ast.literal_eval(config.get("model", "reg_alpha"))
+        self.reg_lambda = ast.literal_eval(config.get("model", "reg_lambda"))
 
         self.search_params = {
             "learning_rate": self.learning_rate,
             "max_depth": self.max_depth,
             "min_child_weight": self.min_child_weight,
             "gamma": self.gamma,
+            "reg_alpha": self.reg_alpha,
+            "reg_lambda": self.reg_lambda,
             "colsample_bytree": self.colsample_bytree,
             "n_estimators": self.n_estimators,
         }
@@ -62,5 +66,5 @@ class ModelConfiguration:
 
         # feature engineering
         self.feature_selection_methods = ast.literal_eval(config.get("feature_engineering", "feature_selection_methods"))
-        self.vif_threshold=config.getint("feature_engineering","vif_threshold")
+        self.corr_threshold=config.getfloat("feature_engineering","corr_threshold")
         self.n_features=config.getint("feature_engineering","n_features")
