@@ -18,6 +18,8 @@ from sklearn.metrics import (
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier, plot_importance
+from lightgbm import LGBMClassifier
+from catboost import CatBoostClassifier
 from utils import split_data
 
 class MLClassifier:
@@ -31,24 +33,23 @@ class MLClassifier:
                 n_iter: int,
                 cv_splits: int,
                 cv_gap: int,
-                verbosity: int,
-                eval_metric: str,
-                random_state: int,
                 n_jobs: int,
-                boosting_params: Dict
+                random_state: int,
+                boosting_params: Dict,
+                boosting_algo: str
                 ) -> None:
         self.X_train, self.X_test  = split_data(X[features], test_size)
         self.y_train, self.y_test  = split_data(y, test_size)
         self.test_size = test_size
-        self.search_params = search_params
+        self.search_params = search_params[boosting_algo]
         self.n_iter = n_iter
         self.cv_splits = cv_splits
         self.cv_gap = cv_gap
-        self.verbosity = verbosity
-        self.eval_metric = eval_metric
-        self.random_state = random_state
         self.n_jobs = n_jobs
-        self.boosting_params = boosting_params
+        self.random_state = random_state
+        self.boosting_params = boosting_params[boosting_algo]
+        self.boosting_algo = boosting_algo
+        self.strategy = dict()
 
     def tune_model(
         self
@@ -57,7 +58,12 @@ class MLClassifier:
             class_weight="balanced",
             y=self.y_train,
         )
-        model = XGBClassifier(**self.boosting_params)
+        if self.boosting_algo == "xgboost":
+            model = XGBClassifier(**self.boosting_params)
+        elif self.boosting_algo == "lightgbm":
+            model = LGBMClassifier(**self.boosting_params)
+        elif self.boosting_algo == "catboost":
+            model = CatBoostClassifier(**self.boosting_params)
         self.search = RandomizedSearchCV(
             estimator=model,
             param_distributions=self.search_params,
@@ -74,11 +80,6 @@ class MLClassifier:
             sample_weight=sample_weights,
         )
         self.model = self.search.best_estimator_
-        return self.search
-
-    def fit(self) -> Any:
-        self.tune_model()
-        return self.model
 
     def evaluate(self) -> Dict[str, float]:
         train_predictions = self.model.predict(self.X_train)
@@ -87,7 +88,7 @@ class MLClassifier:
         positive_index = list(self.model.classes_).index(1)
         positive_probabilities = test_probabilities[:, positive_index]
 
-        metrics = {
+        self.metrics = {
             "train_accuracy": accuracy_score(self.y_train, train_predictions),
             "test_accuracy": accuracy_score(self.y_test, test_predictions),
             "train_balanced_accuracy": balanced_accuracy_score(
@@ -103,50 +104,50 @@ class MLClassifier:
             ),
             "recall": recall_score(self.y_test, test_predictions, zero_division=0),
         }
-        self.metric_summary = metrics
         self.classification_summary = classification_report(
             self.y_test,
             test_predictions,
             output_dict=True,
             zero_division=0,
         )
-        return metrics
 
-    def plot_confusion_matrix(self) -> None:
-        disp = ConfusionMatrixDisplay.from_estimator(
-            self.model,
-            self.X_test,
-            self.y_test,
-            display_labels=self.model.classes_,
-            cmap=plt.cm.Blues,
-        )
-        disp.ax_.set_title("Confusion matrix")
+    @staticmethod
+    def plot_evaluation_grid(classifiers: Dict[str, "MLClassifier"]) -> None:
+        """Plot confusion matrices, ROC curves and precision-recall curves.
+
+        Rows are the three plot types and columns are the boosting algorithms.
+        """
+        n_algos = len(classifiers)
+        fig, axes = plt.subplots(3, n_algos, figsize=(5 * n_algos, 16), squeeze=False)
+        for col, (algo, clf) in enumerate(classifiers.items()):
+            ConfusionMatrixDisplay.from_estimator(
+                clf.model,
+                clf.X_test,
+                clf.y_test,
+                display_labels=clf.model.classes_,
+                cmap=plt.cm.Blues,
+                ax=axes[0, col],
+                colorbar=False,
+            )
+            axes[0, col].set_title(f"{algo}: confusion matrix")
+
+            RocCurveDisplay.from_estimator(
+                clf.model, clf.X_test, clf.y_test, name=algo, ax=axes[1, col]
+            )
+            axes[1, col].plot([0, 1], [0, 1], linestyle="--", color="grey")
+            axes[1, col].set_title(f"{algo}: ROC curve")
+
+            PrecisionRecallDisplay.from_estimator(
+                clf.model, clf.X_test, clf.y_test, name=algo, ax=axes[2, col]
+            )
+            axes[2, col].set_title(f"{algo}: precision-recall curve")
+        fig.tight_layout(h_pad=4.0)
+        plt.show()
         plt.show()
 
-    def plot_roc_curve(self) -> None:
-        disp = RocCurveDisplay.from_estimator(
-            self.model,
-            self.X_test,
-            self.y_test,
-            name="XGBoost",
-        )
-        disp.ax_.set_title("ROC curve")
-        plt.plot([0, 1], [0, 1], linestyle="--")
-        plt.show()
-
-    def plot_precision_recall_curve(self) -> None:
-        disp = PrecisionRecallDisplay.from_estimator(
-            self.model,
-            self.X_test,
-            self.y_test,
-            name="XGBoost",
-        )
-        disp.ax_.set_title("Precision-recall curve")
-        plt.show()
-
-    def plot_feature_importance(self, importance_type: str = "gain") -> None:
+    def plot_feature_importance(self, model, importance_type: str = "gain") -> None:
         plot_importance(
-            self.model,
+            model,
             importance_type=importance_type,
             show_values=False,
         )
@@ -169,57 +170,41 @@ class MLClassifier:
         return (cumulative_returns - cumulative_returns.cummax()).min()
 
     def create_trading_signal(self, returns) -> pd.DataFrame:
+        
+        self.signal = self.X_test.copy()
+        self.signal["Signal"] = self.model.predict(self.X_test)
+        self.signal["tomorrow_returns"] = returns
+        self.signal["Strategy"] = self.signal["tomorrow_returns"] * self.signal["Signal"]
 
-        signal_frame = self.X_test.copy()
-        signal_frame["Signal"] = self.model.predict(self.X_test)
-        signal_frame["tomorrow_returns"] = returns
-        signal_frame["Strategy"] = signal_frame["tomorrow_returns"] * signal_frame["Signal"]
-        signal_frame.to_csv("trading_signal.csv")
+        strategy_cum = self.signal["Strategy"].cumsum()
+        benchmark_cum = self.signal["tomorrow_returns"].cumsum()
 
-        cumulative_strategy = signal_frame["Strategy"].cumsum()
-        cumulative_benchmark = signal_frame["tomorrow_returns"].cumsum()
-
-        sharpe = (signal_frame["Strategy"].mean() / signal_frame["Strategy"].std()) * np.sqrt(252)
-        benchmark_sharpe = (
-            signal_frame["tomorrow_returns"].mean() / signal_frame["tomorrow_returns"].std()
+        self.strategy["Sharpe"] = (self.signal["Strategy"].mean() / self.signal["Strategy"].std()) * np.sqrt(252)
+        self.strategy["Benchmark_Sharpe"] = (
+            self.signal["tomorrow_returns"].mean() / self.signal["tomorrow_returns"].std()
         ) * np.sqrt(252)
-        total_return = cumulative_strategy.iloc[-1]
-        benchmark_return = cumulative_benchmark.iloc[-1]
-        max_drawdown = self.max_drawdown(cumulative_strategy)
-        benchmark_max_drawdown = self.max_drawdown(cumulative_benchmark)
-        sortino = self.sortino_ratio(signal_frame["Strategy"])
-        benchmark_sortino = self.sortino_ratio(signal_frame["tomorrow_returns"])
+        self.strategy["Total_Return"] = strategy_cum.iloc[-1]
+        self.strategy["Benchmark_Return"] = benchmark_cum.iloc[-1]
+        self.strategy["Max_Drawdown"] = self.max_drawdown(strategy_cum)
+        self.strategy["Benchmark_Max_Drawdown"] = self.max_drawdown(benchmark_cum)
+        self.strategy["Sortino"] = self.sortino_ratio(self.signal["Strategy"])
+        self.strategy["Benchmark_Sortino"] = self.sortino_ratio(self.signal["tomorrow_returns"])
 
-        signal_frame["Strategy_Cum"] = cumulative_strategy
-        signal_frame["Benchmark_Cum"] = cumulative_benchmark
-        signal_frame["Sharpe"] = sharpe
-        signal_frame["Benchmark_Sharpe"] = benchmark_sharpe
-        signal_frame["Sortino"] = sortino
-        signal_frame["Benchmark_Sortino"] = benchmark_sortino
-        signal_frame["Total_Return"] = total_return
-        signal_frame["Benchmark_Return"] = benchmark_return
-        signal_frame["Max_Drawdown"] = max_drawdown
-        signal_frame["Benchmark_Max_Drawdown"] = benchmark_max_drawdown
-        return signal_frame
+    def run_full_pipeline(self) -> None:
+        self.tune_model()
+        self.evaluate()
 
-    def run_full_pipeline(
-        self,
-        show_plots: bool = True
-    ) -> Dict[str, Any]:
-        self.fit()
-        metrics = self.evaluate()
+        # if show_plots:
+        #     self.plot_confusion_matrix()
+        #     self.plot_roc_curve()
+        #     self.plot_precision_recall_curve()
+        #     self.plot_feature_importance()
 
-        if show_plots:
-            self.plot_confusion_matrix()
-            self.plot_roc_curve()
-            self.plot_precision_recall_curve()
-            self.plot_feature_importance()
-
-        return {
-            "model": self.model,
-            "metrics": metrics,
-            "classification_report": self.classification_summary,
-            "best_params": self.search.best_params_,
-            "best_cv_roc_auc": self.search.best_score_,
-            "best_cv_roc_auc_std": self.search.cv_results_["std_test_score"][self.search.best_index_]
-        }
+        # return {
+        #     "model": self.model,
+        #     "metrics": self.metrics,
+        #     "classification_report": self.classification_summary,
+        #     "best_params": self.search.best_params_,
+        #     "best_cv_roc_auc": self.search.best_score_,
+        #     "best_cv_roc_auc_std": self.search.cv_results_["std_test_score"][self.search.best_index_]
+        # }
