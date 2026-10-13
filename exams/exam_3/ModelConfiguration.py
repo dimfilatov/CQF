@@ -34,16 +34,36 @@ class ModelConfiguration:
         self.n_estimators = ast.literal_eval(config.get("model", "n_estimators"))
         self.reg_alpha = ast.literal_eval(config.get("model", "reg_alpha"))
         self.reg_lambda = ast.literal_eval(config.get("model", "reg_lambda"))
+        self.boosting_algorithms = ast.literal_eval(config.get("model", "boosting_algorithms"))
 
         self.search_params = {
-            "learning_rate": self.learning_rate,
-            "max_depth": self.max_depth,
-            "min_child_weight": self.min_child_weight,
-            "gamma": self.gamma,
-            "reg_alpha": self.reg_alpha,
-            "reg_lambda": self.reg_lambda,
-            "colsample_bytree": self.colsample_bytree,
-            "n_estimators": self.n_estimators,
+            "xgboost":{
+                    "learning_rate": self.learning_rate,
+                    "max_depth": self.max_depth,
+                    "min_child_weight": self.min_child_weight,
+                    "gamma": self.gamma,
+                    "reg_alpha": self.reg_alpha,
+                    "reg_lambda": self.reg_lambda,
+                    "colsample_bytree": self.colsample_bytree,
+                    "n_estimators": self.n_estimators,
+                    },
+            "lightgbm": {
+                "learning_rate": self.learning_rate,
+                "num_leaves": [2 ** depth for depth in self.max_depth],
+                "min_sum_hessian_in_leaf": self.min_child_weight,
+                "lambda_l1": self.reg_alpha,
+                "lambda_l2": self.reg_lambda,
+                "min_gain_to_split": self.gamma,
+                "colsample_bytree": self.colsample_bytree,
+                "n_estimators": self.n_estimators,
+            },
+            "catboost": {
+                "learning_rate": self.learning_rate,
+                "depth": self.max_depth,
+                "l2_leaf_reg": self.reg_lambda,
+                "rsm": self.colsample_bytree,
+                "n_estimators": self.n_estimators,
+            },
         }
 
         # validation params
@@ -52,16 +72,28 @@ class ModelConfiguration:
         self.cv_gap = config.getint("model", "cv_gap")
 
         # boosting params
-        self.verbosity = config.getint("model", "verbosity")
-        self.eval_metric = config.get("model", "eval_metric")
         self.random_state = config.getint("model", "random_state")
         self.n_jobs = config.getint("model", "n_jobs")
 
         self.boosting_params = {
-            "verbosity": self.verbosity,
-            "eval_metric": self.eval_metric,
-            "random_state": self.random_state,
-            "n_jobs": self.n_jobs,
+            "xgboost": {
+                "eval_metric": "logloss",
+                "random_state": self.random_state,
+                "n_jobs": self.n_jobs,
+                "verbosity": 0,
+            },
+            "lightgbm": {
+                "eval_metric": "logloss",
+                "random_state": self.random_state,
+                "n_jobs": self.n_jobs,
+                "verbose": -1,
+            },
+            "catboost": {
+                "eval_metric": "Logloss",
+                "random_state": self.random_state,
+                "verbose": 0,
+                "allow_writing_files": False
+            },
         }
 
         # feature engineering

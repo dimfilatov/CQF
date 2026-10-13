@@ -126,6 +126,7 @@ class FeatureEngineering:
         feature_set = set()
         feature_d = dict()
         features_to_drop = self.correlation_analysis()
+        print(f"features to drop due to correlation analysis: {features_to_drop}, with length: {len(features_to_drop)}")
         self.X = self.X.drop(columns=features_to_drop)
         for i, feature_selection_method in enumerate(self.feature_selection_methods):
             print(f"\nRunning feature selection method: {feature_selection_method}")

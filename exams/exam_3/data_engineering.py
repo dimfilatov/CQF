@@ -61,7 +61,6 @@ class DataEngineering:
 
         self.data["GAP"] = Gap(self.data)
         self.data["RET"] = dailyReturn(self.data["close"])
-        self.data.to_csv("features.csv")
 
         for window in self.windows:
             self.data[f"PCHG{window}"] = self.data["close"].pct_change(window)
@@ -146,13 +145,13 @@ class DataEngineering:
                 continue
             values = data[column]
             series = values.dropna().astype(float)
-            result = adfuller(series, autolag="AIC", result_object=True)
+            result = adfuller(series, maxlag = 1, autolag=None, result_object=True)
             adf_statistics[column] = result.statistic
             adf_pvalues[column] = result.pvalue
             # KPSS p-values are interpolated and clipped to [0.01, 0.1]
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", InterpolationWarning)
-                kpss_result = kpss(series, regression="c", nlags="auto", result_object=True)
+                kpss_result = kpss(series, regression="c", nlags=1, result_object=True)
             kpss_statistics[column] = kpss_result.statistic
             kpss_pvalues[column] = kpss_result.pvalue
 
@@ -161,9 +160,12 @@ class DataEngineering:
         summary["KPSS Statistic"] = pd.Series(kpss_statistics)
         summary["KPSS p-value"] = pd.Series(kpss_pvalues)
         # ADF: H0 = unit root, pass when rejected. KPSS: H0 = stationary, pass when not rejected.
-        summary["ADF Pass"] = summary["ADF p-value"].lt(self.stationarity_alpha).astype(int)
-        summary["KPSS Pass"] = summary["KPSS p-value"].gt(self.stationarity_alpha).astype(int)
-        summary["Include"] = (summary["ADF Pass"] * summary["KPSS Pass"]).astype(bool)
+        # Columns without tests (Label) stay NaN/<NA> instead of False
+        adf_pass = summary["ADF p-value"].lt(self.stationarity_alpha).astype("boolean")
+        kpss_pass = summary["KPSS p-value"].gt(self.stationarity_alpha).astype("boolean")
+        summary["ADF Pass"] = adf_pass.where(summary["ADF p-value"].notna()).astype("Int64")
+        summary["KPSS Pass"] = kpss_pass.where(summary["KPSS p-value"].notna()).astype("Int64")
+        summary["Include"] = (summary["ADF Pass"] * summary["KPSS Pass"]).astype("boolean")
 
         display(summary)
         return summary
