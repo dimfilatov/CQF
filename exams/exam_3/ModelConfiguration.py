@@ -35,7 +35,9 @@ class ModelConfiguration:
         self.reg_alpha = ast.literal_eval(config.get("model", "reg_alpha"))
         self.reg_lambda = ast.literal_eval(config.get("model", "reg_lambda"))
         self.boosting_algorithms = ast.literal_eval(config.get("model", "boosting_algorithms"))
-
+        self.random_strength = ast.literal_eval(config.get("model", "random_strength"))
+        self.subsample = ast.literal_eval(config.get("model", "subsample"))
+        self.subsample_freq = config.getint("model", "subsample_freq")
         self.search_params = {
             "xgboost":{
                     "learning_rate": self.learning_rate,
@@ -46,23 +48,26 @@ class ModelConfiguration:
                     "reg_lambda": self.reg_lambda,
                     "colsample_bytree": self.colsample_bytree,
                     "n_estimators": self.n_estimators,
+                    "subsample": self.subsample,
                     },
             "lightgbm": {
                 "learning_rate": self.learning_rate,
-                "num_leaves": [2 ** depth for depth in self.max_depth],
-                "min_sum_hessian_in_leaf": self.min_child_weight,
-                "lambda_l1": self.reg_alpha,
-                "lambda_l2": self.reg_lambda,
-                "min_gain_to_split": self.gamma,
+                "max_depth": self.max_depth,
+                "min_child_weight": self.min_child_weight,
+                "reg_alpha": self.reg_alpha,
+                "reg_lambda": self.reg_lambda,
+                "min_split_gain": self.gamma,
                 "colsample_bytree": self.colsample_bytree,
                 "n_estimators": self.n_estimators,
+                "subsample": self.subsample
             },
             "catboost": {
                 "learning_rate": self.learning_rate,
                 "depth": self.max_depth,
                 "l2_leaf_reg": self.reg_lambda,
+                "random_strength": self.random_strength,
                 "rsm": self.colsample_bytree,
-                "n_estimators": self.n_estimators,
+                "iterations": self.n_estimators
             },
         }
 
@@ -77,22 +82,32 @@ class ModelConfiguration:
 
         self.boosting_params = {
             "xgboost": {
+                "objective": "binary:logistic",
                 "eval_metric": "logloss",
+                "tree_method": "hist",
                 "random_state": self.random_state,
                 "n_jobs": self.n_jobs,
                 "verbosity": 0,
             },
             "lightgbm": {
-                "eval_metric": "logloss",
+                "objective": "binary",
+                "metric": "binary_logloss",
+                "boosting_type": "gbdt",
                 "random_state": self.random_state,
                 "n_jobs": self.n_jobs,
-                "verbose": -1,
+                "verbosity": -1,
+                "subsample_freq": self.subsample_freq
             },
             "catboost": {
+                "loss_function": "Logloss",
                 "eval_metric": "Logloss",
-                "random_state": self.random_state,
-                "verbose": 0,
-                "allow_writing_files": False
+                "grow_policy": "SymmetricTree",
+                "has_time": True,
+                "boosting_type": "Ordered",
+                "random_seed": self.random_state,
+                "thread_count": self.n_jobs,
+                "verbose": False,
+                "allow_writing_files": False,
             },
         }
 
