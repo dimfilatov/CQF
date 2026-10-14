@@ -58,6 +58,8 @@ class MLClassifier:
             class_weight="balanced",
             y=self.y_train,
         )
+        self.positive_class_ratio = self.y_train.value_counts(normalize=True)[1]
+
         if self.boosting_algo == "xgboost":
             model = XGBClassifier(**self.boosting_params)
         elif self.boosting_algo == "lightgbm":
@@ -179,32 +181,29 @@ class MLClassifier:
         strategy_cum = self.signal["Strategy"].cumsum()
         benchmark_cum = self.signal["tomorrow_returns"].cumsum()
 
+        self.signal["coin_flip"] = self.coin_flip_strategy() * self.signal["tomorrow_returns"]
+        flip_coin_cum = self.signal["coin_flip"].cumsum()
+
         self.strategy["Sharpe"] = (self.signal["Strategy"].mean() / self.signal["Strategy"].std()) * np.sqrt(252)
-        self.strategy["Benchmark_Sharpe"] = (
-            self.signal["tomorrow_returns"].mean() / self.signal["tomorrow_returns"].std()
-        ) * np.sqrt(252)
+        self.strategy["Benchmark_Sharpe"] = (self.signal["tomorrow_returns"].mean() / self.signal["tomorrow_returns"].std()) * np.sqrt(252)
+        self.strategy["Coin_Sharpe"] = (self.signal["coin_flip"].mean() / self.signal["coin_flip"].std()) * np.sqrt(252)
+        
         self.strategy["Total_Return"] = strategy_cum.iloc[-1]
         self.strategy["Benchmark_Return"] = benchmark_cum.iloc[-1]
+        self.strategy["Coin_Return"] = flip_coin_cum.iloc[-1]
+
         self.strategy["Max_Drawdown"] = self.max_drawdown(strategy_cum)
         self.strategy["Benchmark_Max_Drawdown"] = self.max_drawdown(benchmark_cum)
+        self.strategy["Coin_Max_Drawdown"] = self.max_drawdown(flip_coin_cum)
+
         self.strategy["Sortino"] = self.sortino_ratio(self.signal["Strategy"])
         self.strategy["Benchmark_Sortino"] = self.sortino_ratio(self.signal["tomorrow_returns"])
+        self.strategy["Coin_Sortino"] = self.sortino_ratio(self.signal["coin_flip"])
 
+    def coin_flip_strategy(self) -> List:
+        np.random.seed(self.random_state)
+        return np.random.rand(len(self.X_test)) < self.positive_class_ratio
+        
     def run_full_pipeline(self) -> None:
         self.tune_model()
         self.evaluate()
-
-        # if show_plots:
-        #     self.plot_confusion_matrix()
-        #     self.plot_roc_curve()
-        #     self.plot_precision_recall_curve()
-        #     self.plot_feature_importance()
-
-        # return {
-        #     "model": self.model,
-        #     "metrics": self.metrics,
-        #     "classification_report": self.classification_summary,
-        #     "best_params": self.search.best_params_,
-        #     "best_cv_roc_auc": self.search.best_score_,
-        #     "best_cv_roc_auc_std": self.search.cv_results_["std_test_score"][self.search.best_index_]
-        # }

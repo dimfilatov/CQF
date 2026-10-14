@@ -47,7 +47,7 @@ class DataEngineering:
         self.downloaded_row_count = len(downloaded)
         self.data = downloaded.loc[:, self.required_columns].copy()
         self.data.index = pd.to_datetime(self.data.index)
-        self.data.index.name = "date"
+        self.data = self.data.sort_index()
         self.original_feature_columns = list(self.data.columns)
 
         self.clean_data()
