@@ -14,6 +14,7 @@ class ModelConfiguration:
         # data params
         self.yahoo_symbol = config.get("data", "yahoo_symbol")
         self.start_date = config.get("data", "start_date")
+        self.end_date = config.get("data", "end_date")
         self.test_size = config.getfloat("data", "test_size")
         self.required_columns = ast.literal_eval(
             config.get("data", "required_columns")
