@@ -18,6 +18,7 @@ class DataEngineering:
         self,
         yahoo_symbol: str,
         start_date: str,
+        end_date: str,
         test_size: float,
         required_columns: List,
         windows: List,
@@ -25,6 +26,7 @@ class DataEngineering:
     ) -> None:
         self.yahoo_symbol = yahoo_symbol
         self.start_date = start_date
+        self.end_date = end_date
         self.test_size = test_size
         self.required_columns = required_columns
         self.windows = windows
@@ -37,6 +39,7 @@ class DataEngineering:
         downloaded = yf.download(
             tickers = self.yahoo_symbol,
             start=self.start_date,
+            end=self.end_date,
             auto_adjust=False,
             progress=False,
             multi_level_index=False,

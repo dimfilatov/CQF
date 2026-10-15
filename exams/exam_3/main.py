@@ -8,6 +8,7 @@ config.load_params()
 data_engineering= DataEngineering(
     yahoo_symbol=config.yahoo_symbol,
     start_date=config.start_date,
+    end_date=config.end_date,
     test_size=config.test_size,
     required_columns=config.required_columns,
     windows=config.windows,
