@@ -11,8 +11,7 @@ conda activate my_env
 4. install required dependencies:
 pip install -r requirements.txt
 
-5a. run full pipeline from the root:
+5a. run exam_3.ipynb from jupyter notebook (contains more plots and tables than main.py). Exam pdf file was generated based on this notebook. In this file main.py is called at runtime.
+
+5. Or, alternatively run full pipeline from the root (some plots and tables are only present in notebook):
 python main.py
-
-5b. alternatively, run exam_3.ipynb from jupyter notebook, if you want to generate pdf 
-
