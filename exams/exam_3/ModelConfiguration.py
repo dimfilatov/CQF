@@ -104,7 +104,6 @@ class ModelConfiguration:
                 "eval_metric": "Logloss",
                 "grow_policy": "SymmetricTree",
                 "has_time": True,
-                "boosting_type": "Ordered",
                 "random_seed": self.random_state,
                 "thread_count": self.n_jobs,
                 "verbose": False,
