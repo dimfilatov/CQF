@@ -40,13 +40,6 @@ class FeatureSelection:
         print("VIF scores:")
         print(self.vif_df.to_string(index=False))
 
-    def method_vif(self, vif_threshold):
-        self.vif_scores()
-        selected = self.vif_df[self.vif_df["VIF Factor"] <= vif_threshold]
-        columns = selected["Features"].tolist()
-        self.X_subset = self.X[columns]
-        self.selected_features["VIF"] = columns
-
     def method_select_k_best(self, k):
         selector = SelectKBest(score_func=f_regression, k=k)
         X_selected = selector.fit_transform(self.X, self.y)

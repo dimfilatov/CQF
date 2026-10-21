@@ -17,8 +17,108 @@ may also require the optional `quantmod` package or external data access.
 | `linear_regression.py` | Fetches market data, creates price/return/technical-indicator features, removes highly correlated features, then compares Linear Regression, Lasso, Ridge, and ElasticNet on a chronological holdout using R-squared, MSE, and RMSE. Requires `quantmod`. |
 | `loanclub.py` | Separates loan features and labels, calculates entropy and information gain for a selected feature, and trains/plots a decision-tree classifier on supplied LendingClub train/test/validation data. |
 | `logistic_regression.py` | Fetches market data and creates technical indicators for binary trend classification. It removes highly correlated features, scales selected columns robustly and the others with standard scaling, fits class-balanced logistic regression, evaluates it, and calculates a simple test-period trading signal and return summary. Requires `quantmod`. |
+| `macro_forecasting.py` | Converts the macroeconomic rolling-forecast workflow into a class-based Python module. It parses the supplied metadata-driven data and evaluation-period CSVs, then compares AR, linear regression, decision tree, random forest, and XGBoost forecasts. |
 | `outlier_transform.py` | Implements a scikit-learn-style transformer that clips columns to configured lower/upper percentile bounds. Its example applies this to several SPY return horizons and plots the original and clipped distributions. |
 | `quadratic_loss_boosting.py` | Demonstrates regression boosting on synthetic quadratic data. It fits shallow regression trees sequentially, with each later tree fitted to the residuals from the current ensemble, and plots each stage. See the detailed walkthrough below. |
+
+## Related coursework
+
+The neighboring coursework folders contain two additional projects:
+
+- [`module_5/NLP.ipynb`](../module_5/NLP.ipynb) is a practical tour of natural
+  language processing in finance. It covers count and TF-IDF representations,
+  sentiment classification, clustering and topic models, word embeddings,
+  RNNs and LSTMs, transformer attention, pretrained financial encoders, and
+  language models. The notebook uses a reproducible financial-headline corpus
+  with an embedded fallback. From the `CQF` folder, launch it with:
+
+  ```powershell
+  jupyter notebook module_5\NLP.ipynb
+  ```
+
+- [`exams/exam_3/readme.txt`](../exams/exam_3/readme.txt) documents a
+  configurable SPY classification pipeline. It downloads market data,
+  engineers technical features, filters features for stationarity and
+  redundancy, and compares XGBoost, LightGBM, and CatBoost using time-series
+  cross-validation. It reports classification metrics and evaluates a simple
+  trading strategy.
+  The notebook includes additional tables and plots beyond the script output.
+  Yahoo Finance data access is required. From the `exams\exam_3` folder:
+
+  ```powershell
+  pip install -r requirements.txt
+  python main.py
+  ```
+
+  To run the notebook instead, use `jupyter notebook exam_3.ipynb` from that
+  folder.
+
+## `macro_forecasting.py`: rolling macroeconomic forecasts
+
+`MacroForecasting` reads `data/Macro_Data_US_1963.csv` and
+`data/Macro_OOS Periods.csv` by default, using paths relative to the module
+file. It aligns observations into a supervised dataset where predictors at
+month `t` are used to forecast the selected target at month `t+1`. By default,
+the target is transformed `SPY` and the regressors match the list in the R
+script. The default window is 60 monthly feature/target pairs.
+
+The macro data file is not a standard single-header CSV. Its first rows encode
+the start date, per-variable divide-by-100 flags, transformation codes,
+metadata, and variable names; observations begin on row six. The Python loader
+applies the scale flags, then supports:
+
+- `0`: retain the scaled level.
+- `D`: first difference.
+- `R`: discrete percentage return.
+- `ER`: log return less the prior month's one-year yield divided by 12.
+
+Rows with missing values after transformation are dropped, as in the R
+workflow. `Macro_OOS Periods.csv` supplies inclusive `Start`, `End`, and
+`Comment` values for evaluation windows.
+
+Each rolling window uses its first `window_size - h_gap - 1` rows for fitting,
+skips `h_gap` rows, and forecasts the final row's next-period target. With the
+defaults this fits on 58 rows, leaves one observation between fit and forecast,
+and predicts from the 60th row. Every model's feature columns and target are
+standardized using training-window statistics only; predictions are converted
+back to the target's transformed units.
+
+The five model IDs are:
+
+- `AR`: one-lag autoregression, fitting future target on the current target.
+- `LR`: ordinary linear regression using the configured regressors.
+- `DT`: regression tree using 20-row minimum split and 7-row minimum leaf
+  settings to approximate the R `rpart` defaults.
+- `RF`: 100 bagged regression trees, each fit on a 63.2% subsample without
+  replacement, with up to three randomly selected features per split. This
+  approximates the R `randomForest` defaults used with `replace=FALSE`.
+- `XB`: XGBoost squared-error regression. The number of boosting rounds is
+  chosen by five-fold CV RMSE with early stopping, then the model is refitted
+  to the rolling training window.
+
+The XGBoost CV mirrors the R script's shuffled folds, not a chronological
+split. This follows the source workflow, although random folds can leak future
+time-period information into model selection. For strict time-series
+validation, replace this with chronological CV.
+
+For each configured period the module reports information coefficient (the
+Pearson correlation of actual and predicted target values), hit ratio (whether
+actual and forecast signs match), and RMSFE. It also calculates performance
+relative to the AR baseline and in-sample training MSE and Durbin-Watson
+statistics for each rolling fit. Unlike the R script's apparent MSE
+calculation issue, Python uses the standard mean of squared residuals.
+
+Run from the repository root or the `module_4` folder:
+
+```powershell
+python module_4\macro_forecasting.py
+```
+
+The script writes `macro_forecasts.csv`, `macro_period_results.csv`, and
+`macro_relative_results.csv` under `module_4\macro_forecast_output`. From
+Python, customize paths and settings with `MacroForecasting(...)`, then call
+`run_full_pipeline()`. Pass `show_plots=True` to plot the actual series,
+forecasts, and Durbin-Watson statistics.
 
 ## `quadratic_loss_boosting.py`: residual-based regression boosting
 
@@ -293,3 +393,30 @@ strictly fold-local class weighting, calculate weights from each CV training
 fold separately (for example, with a custom CV loop or estimator that
 computes weights inside `fit`). The final refit uses weights computed from
 the full outer training set, as intended.
+
+## `spy_signal_prediction.py`: volatility-scaled SPY signals
+
+This workflow creates three labels from daily `Close` prices. The default
+vertical horizon is five trading sessions. At each future close, the upper
+and lower barriers are centered on the entry close and use the latest
+volatility estimate observable before that session:
+
+`barrier width = sqrt(horizon) * EWM standard deviation of daily log returns`
+
+The EWM estimate uses a span of 100 sessions by default. A close at or above
+the upper barrier first yields `+1`; a close at or below the lower barrier
+first yields `-1`. If neither barrier is reached by the horizon, the label is
+the sign of `Close(t+horizon) / Close(t) - 1`. Barrier touches use closes,
+not intraday High/Low. Returns and volatility features use only present and
+past observations.
+
+All available history is used to warm up rolling features before
+`start_date` is applied, so the first modeled observations retain valid
+lookback history. The holdout is chronological, and the final `horizon`
+training observations before it are purged because their outcome windows
+could overlap the test period. Time-series CV uses a gap of at least the
+horizon for the same reason. Hyperparameter selection uses multiclass
+balanced accuracy; the classifier trains on contiguous encoded IDs for the
+actual labels and reports predictions using `-1`, `0`, and `+1`. Label
+encoding and balanced sample weights are computed inside each CV training
+fold, so validation labels do not affect that fold's fit.

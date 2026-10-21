@@ -54,6 +54,7 @@ feature selection, decision trees, and boosting.
 ### Key Components:
 - **Regression and Optimization**: Linear regression model comparisons, logistic regression, and batch gradient descent
 - **Classification**: K-nearest neighbors, loan-status decision-tree classification, and market-trend logistic and XGBoost classifiers
+- **Macroeconomic Forecasting**: Rolling one-period-ahead forecasts using AR, linear regression, decision tree, random forest, and XGBoost, evaluated across configured economic periods
 - **Boosting**: A from-scratch residual-based regression boosting example and an XGBoost classification workflow with randomized hyperparameter search and time-series cross-validation
 - **Feature Preparation and Selection**: Percentile-based outlier clipping, correlation filtering, VIF, SelectKBest, RFE, and RFECV
 - **Model Evaluation**: Classification and regression metrics, visualizations, and a basic trading-signal analysis
