@@ -41,6 +41,7 @@ class NN:
                                     start_date=self.config['start'],
                                     end_date=self.config['end']
                                     )
+        print(raw.head())
 
         data = raw.set_index(pd.to_datetime(raw['date']))[['close']]
 
@@ -138,6 +139,7 @@ class NN:
         ax.axhline(train_data['close'].max(), color='tab:red', ls='--', lw=1, label='Training maximum')
         ax.set(title=f"S&P 500 next-day prediction on the test block (R² = {lstm_scores['R²']:.4f})", ylabel='Index level')
         ax.legend()
+        plt.show()
 
     def main(self):
         self.load_data()
@@ -175,6 +177,7 @@ class NN:
         ax.plot(history.history['val_loss'], label='Validation')
         ax.set(title='Learning curves', xlabel='Epoch', ylabel='MSE (scaled, log scale)', yscale='log')
         ax.legend()
+        plt.show()
 
         # Load the best checkpoint
         model = keras.models.load_model(model_path)
@@ -202,7 +205,7 @@ if __name__ == "__main__":
     config = dict(
     symbol='nifty',             # quantmod bundled dataset: 'spx' or 'nifty'
     start='2012-01-02',         # '2012-01-02' for nifty
-    end='2019-12-31',           # '2022-12-30' for nifty
+    end='2020',           # '2022-12-30' for nifty
     seqlen=60,                  # lookback window, in trading days
     units=32,                   # LSTM hidden units
     activation='tanh',          # Keras default; see the note in the model section
