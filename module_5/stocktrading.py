@@ -5,17 +5,30 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from gymnasium import spaces
-from stable_baselines3 import PPO, A2C
+from stable_baselines3 import A2C, PPO
+
+PRICE_COLS = ["close", "open", "high", "low"]
+ALGOS = {"PPO": PPO, "A2C": A2C}
+
+
+def compute_norm(df):
+    """Per-column maxima used to scale prices. Fit on TRAIN data only."""
+    return {c: float(df[c].max()) for c in PRICE_COLS}
 
 
 class StockTradingEnv(gym.Env):
-    def __init__(self, df, initial_balance=100000, max_shares=100):
+    def __init__(self, df, norm=None, initial_balance=100000, max_shares=100):
         super().__init__()
         self.df = df
+        # Normalization constants: pass train-set maxima to the test env so
+        # the agent never sees information from the future.
+        self.norm = norm if norm is not None else compute_norm(df)
+
         self.reward_range = (-np.inf, np.inf)
-        self.action_space = spaces.Discrete(3)
+        self.action_space = spaces.Discrete(3)  # 0 = buy, 1 = sell all, 2 = hold
+        # Test prices can exceed train maxima, so the upper bound is open.
         self.observation_space = spaces.Box(
-            low=0, high=1, shape=(6,), dtype=np.float32
+            low=0, high=np.inf, shape=(6,), dtype=np.float32
         )
 
         self.current_step = 0
@@ -37,22 +50,23 @@ class StockTradingEnv(gym.Env):
         return self._next_observation(), {}
 
     def _next_observation(self):
-        frame = np.array(
+        row = self.df.iloc[self.current_step]
+        return np.array(
             [
                 self.balance / self.initial_balance,
                 self.shares_held / self.max_shares,
-                self.current_price / self.df["close"].max(),
-                self.df.iloc[self.current_step]["open"] / self.df["open"].max(),
-                self.df.iloc[self.current_step]["high"] / self.df["high"].max(),
-                self.df.iloc[self.current_step]["low"] / self.df["low"].max(),
+                self.current_price / self.norm["close"],
+                row["open"] / self.norm["open"],
+                row["high"] / self.norm["high"],
+                row["low"] / self.norm["low"],
             ],
             dtype=np.float32,
         )
-        return frame
 
     def step(self, action):
         prev_portfolio_value = self.balance + self.shares_held * self.current_price
 
+        # The decision is made on the observation at t, executed at close[t+1].
         self.current_step += 1
         self.current_price = self.df.iloc[self.current_step]["close"]
 
@@ -64,8 +78,7 @@ class StockTradingEnv(gym.Env):
             self.balance -= shares_to_buy * self.current_price
             self.shares_held += shares_to_buy
         elif action == 1:
-            shares_to_sell = self.shares_held
-            self.balance += shares_to_sell * self.current_price
+            self.balance += self.shares_held * self.current_price
             self.shares_held = 0
 
         new_portfolio_value = self.balance + self.shares_held * self.current_price
@@ -74,14 +87,14 @@ class StockTradingEnv(gym.Env):
 
         terminated = self.current_step >= self.total_steps - 1
         truncated = False
-        obs = self._next_observation()
-        return obs, reward, terminated, truncated, {}
+        return self._next_observation(), reward, terminated, truncated, {}
 
 
-def train_agent(env, model_class, model_params, train_timesteps, tensorboard_log=None):
+def train_agent(env, model_class, model_params, train_timesteps, seed, tensorboard_log=None):
     model = model_class(
         policy="MlpPolicy",
         env=env,
+        seed=seed,
         **model_params,
         tensorboard_log=tensorboard_log,
     )
@@ -92,58 +105,106 @@ def train_agent(env, model_class, model_params, train_timesteps, tensorboard_log
 def test_agent(env, model):
     obs, _ = env.reset()
     for _ in range(len(env.df) - 1):
-        action, _ = model.predict(obs)
+        action, _ = model.predict(obs, deterministic=False)
         obs, _, terminated, _, _ = env.step(action)
         if terminated:
             break
     return np.cumsum(env.cumulative_rewards)
 
 
-def plot_cumulative_rewards(rewards, name):
-    plt.plot(rewards, label=name)
+def buy_and_hold(env):
+    """Buy at close[1] (the first price the agent can trade at), hold to the end.
+    Returns cumulative P&L aligned with the agent's cumulative rewards."""
+    prices = env.df["close"].to_numpy()
+    entry = prices[1]
+    shares = min(env.initial_balance // entry, env.max_shares)
+    cash = env.initial_balance - shares * entry
+    values = cash + shares * prices[1:]
+    return values - env.initial_balance
+
+
+def max_drawdown(pnl, initial_balance):
+    equity = initial_balance + np.asarray(pnl)
+    peak = np.maximum.accumulate(equity)
+    return ((equity - peak) / peak).min()
+
+
+def plot_comparison(agent_curves, bh_pnl, name):
+    curves = np.vstack(agent_curves)
+    mean, std = curves.mean(axis=0), curves.std(axis=0)
+    x = np.arange(curves.shape[1])
+
+    plt.figure(figsize=(10, 5))
+    for c in curves:
+        plt.plot(x, c, color="tab:blue", alpha=0.15, linewidth=0.8)
+    plt.plot(x, mean, color="tab:blue", label=f"{name} mean ({len(curves)} seeds)")
+    plt.fill_between(x, mean - std, mean + std, color="tab:blue", alpha=0.2, label="±1 std")
+    plt.plot(x, bh_pnl, color="black", linestyle="--", label="Buy & Hold")
     plt.xlabel("Trading Days")
-    plt.ylabel("Cumulative Reward")
-    plt.title(f"Cumulative Reward - {name}")
+    plt.ylabel("Cumulative P&L")
+    plt.title(f"Test Period: {name} vs Buy & Hold")
     plt.legend()
+    plt.tight_layout()
     plt.show()
 
 
-# Main function
 def main():
-    # Get stock data
-    df = pd.read_csv('data/nifty50.csv', index_col=0, parse_dates=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data", default="data/nifty50.csv")
+    parser.add_argument("--algo", default="A2C", choices=ALGOS.keys())
+    parser.add_argument("--seeds", type=int, default=5)
+    parser.add_argument("--timesteps", type=int, default=100_000)
+    parser.add_argument("--lr", type=float, default=0.0003)
+    args = parser.parse_args()
+
+    df = pd.read_csv(args.data, index_col=0, parse_dates=True)
     print("Data loaded successfully")
 
-    # Split the data into training and test sets
     ratio = 0.80
-    train_size = int(df.shape[0]*ratio)
+    train_size = int(df.shape[0] * ratio)
     train, test = df.iloc[:train_size], df.iloc[train_size:]
-    print("Data split successfully")
-    print(f"Traning Data: {train.shape}, Test Data: {test.shape}")
+    print(f"Training Data: {train.shape}, Test Data: {test.shape}")
 
-    # Initialize the training & test environment
-    train_env = StockTradingEnv(train)
-    test_env = StockTradingEnv(test)
-    print("Environments initialized successfully")
+    # Normalization constants come from the train set only.
+    norm = compute_norm(train)
+    test_env = StockTradingEnv(test, norm=norm)
+    initial_balance = test_env.initial_balance
 
-    # Define RL algorithm
-    algorithm = {
-        "PPO": (PPO, {"learning_rate": 0.0003}),
-        # "A2C": (A2C, {"learning_rate": 0.0003}),
-    }
+    bh = buy_and_hold(test_env)
+    bh_dd = max_drawdown(bh, initial_balance)
 
-    # Train, test, and plot for each algorithm
-    for name, (algo, params) in algorithm.items():
-        print("Training the agent...")
-        model = train_agent(train_env, algo, params, train_timesteps=100000)
-        rewards_train = np.cumsum(train_env.cumulative_rewards)
-        plot_cumulative_rewards(rewards_train, name)
+    model_class = ALGOS[args.algo]
+    params = {"learning_rate": args.lr}
 
-        print("Testing the agent...")
-        rewards = test_agent(test_env, model)
+    agent_curves = []
+    for seed in range(args.seeds):
+        print(f"Training {args.algo}, seed {seed}...")
+        train_env = StockTradingEnv(train, norm=norm)  # fresh env per seed
+        model = train_agent(
+            train_env, model_class, params, args.timesteps, seed=seed
+        )
+        pnl = test_agent(test_env, model)
+        agent_curves.append(pnl)
+        print(
+            f"  seed {seed}: final P&L = {pnl[-1]:,.0f}, "
+            f"max DD = {max_drawdown(pnl, initial_balance):.2%}"
+        )
 
-        # Plot the cumulative rewards for each algorithm
-        plot_cumulative_rewards(rewards, name)
+    finals = np.array([c[-1] for c in agent_curves])
+    dds = np.array([max_drawdown(c, initial_balance) for c in agent_curves])
+
+    print("\n=== Test period summary ===")
+    print(
+        f"{args.algo} ({args.seeds} seeds): final P&L mean = {finals.mean():,.0f}, "
+        f"std = {finals.std(ddof=1) if len(finals) > 1 else 0:,.0f}, "
+        f"min = {finals.min():,.0f}, max = {finals.max():,.0f}; "
+        f"mean max DD = {dds.mean():.2%}"
+    )
+    print(f"Buy & Hold: final P&L = {bh[-1]:,.0f}, max DD = {bh_dd:.2%}")
+    print(f"Seeds beating Buy & Hold: {(finals > bh[-1]).sum()}/{len(finals)}")
+
+    plot_comparison(agent_curves, bh, args.algo)
+
 
 if __name__ == "__main__":
     main()
