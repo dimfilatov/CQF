@@ -110,8 +110,9 @@ class TDBPModel:
         """He-normal weights, zero biases."""
         rng = np.random.default_rng(self.seed)
         for k, (m, n) in enumerate(zip(self.sizes[:-1], self.sizes[1:])):
-            self.params[2 * k] = rng.standard_normal((m, n)) * np.sqrt(2.0 / m)
-            self.params[2 * k + 1] = np.zeros(n)
+            self.params[2 * k].assign((rng.standard_normal((m, n)) * np.sqrt(2.0 / m)).astype(np.float32))
+            self.params[2 * k + 1].assign(np.zeros(n, dtype=np.float32))
+
 
     def _forward(self, x):
         act, n_layers = TF_ACT[self.activation], len(self.params) // 2
@@ -164,7 +165,7 @@ class TDBPModel:
         self._init_weights()
         for i in range(self.n_steps - 1, -1, -1):
             target = disc * survival[:, i] * U
-            X = np.log(paths["S"][:, [i]] / self.K)
+            X = np.log(paths["S"][:, [i]] / self.scale)
             mean, std = X.mean(0), X.std(0)
             std[std < 1e-8] = 1.0
             epochs = self.epochs if i == self.n_steps - 1 else self.warm_start_epochs
@@ -184,4 +185,4 @@ class TDBPModel:
         alive = self.payoff.alive(S)[:, step] if self.hard_knockout else 1.0
         if step == self.n_steps:
             return self.payoff.terminal(S[:, step]) * alive
-        return self._network_value(step, self.feature_fn(paths, step)) * alive
+        return self._network_value(step, np.log(paths["S"][:, [step]] / self.scale)) * alive

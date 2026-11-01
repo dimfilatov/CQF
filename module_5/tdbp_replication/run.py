@@ -66,7 +66,7 @@ def run_vanilla(figure, caption, payoff_kind, S0, K, r, sigma, n_days, days_per_
     train = sim.simulate(n_train, rng, S0=S0)
     test = sim.simulate(n_test, rng, S0=S0)
 
-    td = TDBPModel(1, payoff, n_steps, dt, r, K, **tdbp).fit(train, None, verbose)
+    td = TDBPModel(1, payoff, n_steps, dt, r, K, **tdbp).fit(train, verbose)
     mc_engine = MonteCarlo(sim, payoff, **mc)
     bs = BlackScholes(r, sigma)
 
@@ -259,80 +259,6 @@ def run_dividends(figures, model, dividend, option, alpha, cash, div_day, S0, K,
 
 
 # ======================================================================
-# 4. Daily price limits in the BS model (Figures 37-72)
-# ======================================================================
-def run_dpl(figures, boundary, limit, sigma, rho, S0, K, mu, n_days, steps_per_day,
-            steps_per_year, n_train, n_test, checkpoint_fracs, dist_paths, dist_horizons,
-            hist_bins, traj_days, tdbp, mc, mc_points, n_print_points, seed, verbose, block):
-    rng = np.random.default_rng(seed)
-    n_steps, dt = n_days * steps_per_day, 1.0 / steps_per_year
-    sim = Simulator(GBM(mu, sigma), n_steps, dt, dividends=[], dpl_limit=limit,
-                    dpl_boundary=boundary, dpl_rho=rho, steps_per_day=steps_per_day)
-    payoff = Payoff("call", K, None, barrier=None, direction=None, bridge=None)
-    bs = BlackScholes(mu, sigma)
-    fig_traj, fig_dist, fig_call = figures
-    name = {"absorbing": "absorption", "instant": "instant reflection", "slow": "slow reflection"}[boundary]
-
-    # ---- trajectories with / without DPL --------------------------------
-    demo = sim.simulate(1, np.random.default_rng(seed + 1), S0=S0)
-    plotting.dpl_trajectories(demo["S"][0], demo["Y"][0], steps_per_day, traj_days, limit,
-                              f"{fig_traj}: Trajectories, {name}, sigma={sigma:.0%}, dpl={limit:.1%}",
-                              block)
-
-    # ---- distribution of log-returns -----------------------------------
-    dist = sim.simulate(dist_paths, np.random.default_rng(seed + 2), S0=S0)
-    no_dpl = {h: np.log(dist["Y"][:, h] / S0) for h in dist_horizons}
-    with_dpl = {h: np.log(dist["S"][:, h] / S0) for h in dist_horizons}
-    print(f"\n{fig_dist}: moments of ln(S_T/S_0), {name}, DPL {limit:.1%}")
-    print(pd.DataFrame([{"horizon (h)": h, "mean no DPL": no_dpl[h].mean(), "mean DPL": with_dpl[h].mean(),
-                         "std no DPL": no_dpl[h].std(), "std DPL": with_dpl[h].std()}
-                        for h in dist_horizons]).to_string(index=False, float_format="{:.5f}".format))
-    plotting.return_distributions(no_dpl, with_dpl, f"{fig_dist}: Distribution of returns, gbm, sigma={sigma}",
-                                  "no limits", f"ub%={limit:.1%}, lb%={limit:.1%}", hist_bins, block)
-
-    # ---- call prices ------------------------------------------------------
-    train = sim.simulate(n_train, rng, S0=S0)
-    test = sim.simulate(n_test, rng, S0=S0)
-    test_Y = {**test, "S": test["Y"]}
-
-    def features(paths, i):          # under DPL the open price and boundary state matter
-        S = paths["S"][:, i]
-        return np.column_stack([np.log(S / K), np.log(S / paths["day_open"][:, i]),
-                                paths["absorbed"][:, i], paths["sign"][:, i],
-                                (paths["stuck"][:, i] > 0) * 1.0])
-
-    td = TDBPModel(features, 5, payoff, n_steps, dt, mu, K, **tdbp).fit(train, None, verbose)
-    mc_engine = MonteCarlo(sim, payoff, **mc)
-
-    panels, ple_rows = [], []
-    for frac in checkpoint_fracs:
-        step = int(round(frac * n_steps))
-        tau = (n_steps - step) * dt
-        td_prices = td.predict(test, step)
-        mc_prices = mc_engine.price_paths(test, step, mc_points)
-        panels.append(dict(step=step, title=f"t={frac:g}*T", series=[
-            series("BS", test_Y, step, bs.price("call", test_Y["S"][:, step], K, tau), "ref"),
-            series("MC", test, step, mc_prices, "mc_green"),
-            series("TD", test, step, td_prices, "td"),
-        ]))
-        # price limit effect PLE = (C - C_BS) / C_BS at the same (t, S)  (slide 76)
-        bs_on_S = bs.price("call", test["S"][:, step], K, tau)
-        bs_on_S = np.where(bs_on_S < 1e-12, np.nan, bs_on_S)
-        ple_td = (td_prices - bs_on_S) / bs_on_S
-        ple_mc = (mc_prices - bs_on_S[:len(mc_prices)]) / bs_on_S[:len(mc_prices)]
-        ple_rows.append({"t/T": frac, "step": step,
-                         "PLE TD mean": np.nanmean(ple_td), "PLE TD median": np.nanmedian(ple_td),
-                         "PLE MC mean": np.nanmean(ple_mc), "PLE MC median": np.nanmedian(ple_mc)})
-
-    title = (f"{fig_call}: Call, GBM, {name} price limits, T={n_steps} hours ({n_days} days), "
-             f"K=${K:g}, price limit of {limit:.1%}, sigma={sigma:.0%}")
-    print_results(title, panels, [("TD", "MC")], n_print_points)
-    print("\nPrice limit effect PLE = (C - C_BS) / C_BS at the same (t, S):")
-    print(pd.DataFrame(ple_rows).to_string(index=False, float_format="{:.4f}".format))
-    plotting.checkpoint_grid(panels, title, 2, 2, "share price, S", "option price", block)
-
-
-# ======================================================================
 # Main: every parameter is defined here
 # ======================================================================
 def main():
@@ -344,12 +270,11 @@ def main():
 
     RUN_LEARNING_RATE_FIGURE = True   # Figure 5
     RUN_VANILLA = True                # Figures 6-10
-    RUN_BARRIER = True                # Figures 11-24
-    RUN_DIVIDENDS = True              # Figures 25-36
-    RUN_DPL = True                    # Figures 37-72
+    RUN_BARRIER = False                # Figures 11-24
+    RUN_DIVIDENDS = False              # Figures 25-36
 
     # ---------------------------------------------- TDBP networks (fast-run sizes)
-    TDBP_VANILLA = dict(
+    TDBP = dict(
         depth=3,                      # hidden layers (slide 21)
         hidden=32,                    # neurons per hidden layer (slide 21)
         activation="leaky_relu",      # leaky_relu | relu | tanh | softplus
@@ -363,9 +288,6 @@ def main():
         hard_knockout=True,           # knocked-out barrier paths are worth 0
         seed=SEED,
     )
-    TDBP_BARRIER = {**TDBP_VANILLA, "depth": 5, "hidden": 64}    # slide 27
-    TDBP_DIVIDEND = {**TDBP_VANILLA, "depth": 4, "hidden": 64}   # not given on the slides
-    TDBP_DPL = {**TDBP_VANILLA, "depth": 5, "hidden": 64}        # not given on the slides
 
     # ------------------------------------------- nested Monte Carlo (fast-run sizes)
     MC = dict(
@@ -382,7 +304,7 @@ def main():
     # ---------------------------------------------------- Figure 5: learning rates
     if RUN_LEARNING_RATE_FIGURE:
         plotting.learning_rates("Figure 5: Exponential, cosine and exponential-cosine decay",
-                                1000, TDBP_VANILLA["lr"], BLOCK_ON_PLOTS)
+                                1000, TDBP["lr"], BLOCK_ON_PLOTS)
 
     # ------------------------------------------------- 1. vanilla payoffs (slide 18)
     if RUN_VANILLA:
@@ -407,7 +329,7 @@ def main():
                 n_test=120,
                 checkpoints=(0, 1, 25, 115),    # I = {0, 1, 25, 115}
                 digital_smoothing=None,         # e.g. 0.5 to smooth digital payoffs (slide 27)
-                tdbp=TDBP_VANILLA,
+                tdbp=TDBP,
                 **common,
             )
 
@@ -448,7 +370,7 @@ def main():
                 n_train=3000,
                 n_test=120,
                 checkpoint_days=(0, 1, 25, 115),
-                tdbp=TDBP_BARRIER,
+                tdbp=TDBP,
                 **common,
             )
 
@@ -494,48 +416,9 @@ def main():
                 n_test=500,                     # out-sample DS_0
                 checkpoints=(0, 20, 59, 61, 70, 90),
                 steps_3d=(0, 59, 61, 90),       # panels of the 3D figures
-                tdbp=TDBP_DIVIDEND,
+                tdbp=TDBP,
                 **common,
             )
-
-    # ------------------------------------- 4. daily price limits (slides 72-113)
-    if RUN_DPL:
-        DPL_CASES = [
-            # (figures: trajectories, distribution, call), boundary, limit, sigma (Tables 3-14)
-            (("Figure 37", "Figure 38", "Figure 39"), "absorbing", 0.005, 0.5),
-            (("Figure 40", "Figure 41", "Figure 42"), "absorbing", 0.02, 0.7),
-            (("Figure 43", "Figure 44", "Figure 45"), "absorbing", 0.05, 0.9),
-            (("Figure 46", "Figure 47", "Figure 48"), "absorbing", 0.07, 1.2),
-            (("Figure 49", "Figure 50", "Figure 51"), "instant", 0.005, 0.5),
-            (("Figure 52", "Figure 53", "Figure 54"), "instant", 0.02, 0.7),
-            (("Figure 55", "Figure 56", "Figure 57"), "instant", 0.05, 0.9),
-            (("Figure 58", "Figure 59", "Figure 60"), "instant", 0.07, 1.2),
-            (("Figure 61", "Figure 62", "Figure 63"), "slow", 0.005, 0.5),
-            (("Figure 64", "Figure 65", "Figure 66"), "slow", 0.02, 0.7),
-            (("Figure 67", "Figure 68", "Figure 69"), "slow", 0.05, 0.9),
-            (("Figure 70", "Figure 71", "Figure 72"), "slow", 0.07, 1.2),
-        ]
-        for figures, boundary, limit, sigma in DPL_CASES:
-            run_dpl(
-                figures=figures, boundary=boundary, limit=limit, sigma=sigma,
-                rho=1.0,                        # slow-reflection viscosity (mean hours stuck)
-                S0=50.0,
-                K=50.0,
-                mu=0.05,                        # read as r = 0.05, q = 0
-                n_days=20,                      # T = 160 hours
-                steps_per_day=8,                # one-hour steps, 8 hours per day
-                steps_per_year=252 * 24,        # dt = 1/(252*24): BS = 1.65 at t=0 (Fig. 39)
-                n_train=1000,
-                n_test=500,
-                checkpoint_fracs=(0.0, 0.3, 0.6, 0.9),
-                dist_paths=20_000,              # paths for the log-return histograms
-                dist_horizons=(160, 80, 40, 16),
-                hist_bins=200,
-                traj_days=5,                    # days shown in the trajectory plot
-                tdbp=TDBP_DPL,
-                **common,
-            )
-
 
 if __name__ == "__main__":
     main()
