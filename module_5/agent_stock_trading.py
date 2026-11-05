@@ -10,10 +10,19 @@ from stable_baselines3 import A2C, PPO
 PRICE_COLS = ["close", "open", "high", "low"]
 ALGOS = {"PPO": PPO, "A2C": A2C}
 
+
+def compute_norm(df):
+    """Per-column maxima used to scale prices. Fit on TRAIN data only."""
+    return {c: float(df[c].max()) for c in PRICE_COLS}
+
+
 class StockTradingEnv(gym.Env):
-    def __init__(self, df, initial_balance=100000, max_shares=100):
+    def __init__(self, df, norm=None, initial_balance=100000, max_shares=100):
         super().__init__()
         self.df = df
+        # Normalization constants: pass train-set maxima to the test env so
+        # the agent never sees information from the future.
+        self.norm = norm if norm is not None else compute_norm(df)
 
         self.reward_range = (-np.inf, np.inf)
         self.action_space = spaces.Discrete(3)  # 0 = buy, 1 = sell all, 2 = hold
@@ -31,7 +40,7 @@ class StockTradingEnv(gym.Env):
         self.max_shares = max_shares
         self.cumulative_rewards = []
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.current_step = 0
         self.balance = self.initial_balance
@@ -46,10 +55,10 @@ class StockTradingEnv(gym.Env):
             [
                 self.balance / self.initial_balance,
                 self.shares_held / self.max_shares,
-                self.current_price / self.df["close"].max(),
-                row["open"] / self.df["open"].max(),
-                row["high"] / self.df["high"].max(),
-                row["low"] / self.df["low"].max(),
+                self.current_price / self.norm["close"],
+                row["open"] / self.norm["open"],
+                row["high"] / self.norm["high"],
+                row["low"] / self.norm["low"],
             ],
             dtype=np.float32,
         )
@@ -156,7 +165,9 @@ def main():
     train, test = df.iloc[:train_size], df.iloc[train_size:]
     print(f"Training Data: {train.shape}, Test Data: {test.shape}")
 
-    test_env = StockTradingEnv(test)
+    # Normalization constants come from the train set only.
+    norm = compute_norm(train)
+    test_env = StockTradingEnv(test, norm=norm)
     initial_balance = test_env.initial_balance
 
     bh = buy_and_hold(test_env)
@@ -168,7 +179,7 @@ def main():
     agent_curves = []
     for seed in range(args.seeds):
         print(f"Training {args.algo}, seed {seed}...")
-        train_env = StockTradingEnv(train)  # fresh env per seed
+        train_env = StockTradingEnv(train, norm=norm)  # fresh env per seed
         model = train_agent(
             train_env, model_class, params, args.timesteps, seed=seed
         )
